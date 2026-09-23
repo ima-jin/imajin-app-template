@@ -53,19 +53,29 @@ This app talks to Imajin as an **external client**. Hard rules, enforced in revi
   - `X-App-DID` — this app's DID (from registration)
   - `X-App-Authorization` — the attestation ID from the user's consent flow
   - The kernel verifies these and returns `{ appDid, userDid, scopes }`. That triple is your entire authority.
-- ❌ **No `@imajin/*` package dependencies.** Not `@imajin/db`, not `@imajin/bus`, not `@imajin/auth`. If you're
-  reaching for one, you're building a first-party app — wrong repo.
-- ❌ **No direct database access.** No Postgres connection, no Drizzle, no migrations. The kernel owns data.
+- ✅ **Published `@imajin/*` packages are fine.** `@imajin/auth`, `@imajin/config`, `@imajin/logger`, `@imajin/ui`, …
+  installed from GitHub Packages (see `.npmrc`) are the SDK — every app, first-party or third-party, consumes the
+  same versioned artifact the same way. Depending on one is not a boundary violation.
+- ❌ **No `workspace:*` dependencies.** A `workspace:*` version range only resolves inside the monorepo. If you see
+  one, this app has drifted back into being a monorepo package instead of an external client.
+- ❌ **No monorepo internals.** No importing `apps/kernel/src/**`, no `@imajin/db`, no direct Postgres access to
+  kernel schemas. The kernel is consumed only via its `/spec`'d HTTP/WS routes and the published SDK — never by
+  reaching around them into the kernel's own source or database.
 - ❌ **No in-process bus.** The bus is kernel-internal. Emit `supply.*`/domain events by calling the kernel's
   app-auth-gated domain API, never by importing a publisher.
 - ❌ **No kernel internals, secrets, or private keys beyond this app's own registration credentials.**
 
+**Logging:** stdout only. The host process manager (pm2) captures it. Never wire a DB log transport — logging is not
+an attestation and must not touch kernel or app data stores.
+
 **Reference implementation: `ima-jin/imajin-scorecard`** — the clean 2nd-party pattern (Next.js, `jose` HS256 session
-cookie, `/api/auth/callback` handling the kernel redirect, zero `@imajin/*` deps). Match its shape. Do **not** copy
-in-monorepo apps (coffee/dykil/learn) — those are first-party and privileged; imitating them breaks the boundary.
+cookie, `/api/auth/callback` handling the kernel redirect, published `@imajin/*` SDK only). Match its shape. Do
+**not** copy in-monorepo apps (coffee/dykil/learn) — those talk to the kernel over the same public contract as this
+app; if one looks privileged, that's the drift this template exists to close, not a pattern to imitate.
 
 **The honest test this app exists to pass:** an outside party can build everything it needs through app-auth + the
-public API *without being inside Imajin*. Every shortcut through the boundary invalidates that test.
+public API *without being inside Imajin*. Every shortcut through the boundary invalidates that test — and Imajin's
+own apps are rebuilt on this same template to prove the sentence above has no first-party exception.
 
 ---
 

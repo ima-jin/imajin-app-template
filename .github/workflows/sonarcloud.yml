@@ -1,0 +1,49 @@
+name: SonarCloud
+
+# Mirrors the shape of ima-jin/imajin-ai's blocking `sonarcloud` CI job
+# (ima-jin/imajin-app-template#3): same zero-new-issues quality gate, no
+# `continue-on-error`. Runs unconditionally, on the bare scaffold and on a
+# filled-in fork alike — see .github/workflows/ci.yml's own detect-app guard
+# for why that split exists there but not here: a Sonar scan of a handful of
+# markdown/config files is cheap and still worth gating on.
+#
+# Requires two manual, one-time steps from a repo admin before this goes
+# green (tracked in the PR that introduced this file):
+#   1. Create the Sonar project on sonarcloud.io for this repo
+#      (sonar.organization/sonar.projectKey in sonar-project.properties).
+#   2. Add SONAR_TOKEN as a repo or org secret.
+# Until both exist, this check fails on purpose. A green check that scanned
+# nothing is a worse signal than a red one that says why.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  sonarcloud:
+    name: SonarCloud
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the scanner can assign blame and compute new-code accurately.
+          fetch-depth: 0
+
+      - name: Require SONAR_TOKEN
+        # A missing token must not be a silent pass — see the header comment.
+        if: ${{ env.SONAR_TOKEN == '' }}
+        run: |
+          echo "::error::SONAR_TOKEN is not set. A repo admin must create the Sonar project on sonarcloud.io for this repo and add SONAR_TOKEN as a repo/org secret (see sonar-project.properties)."
+          exit 1
+
+      - name: SonarCloud Scan
+        # Archived/deprecated upstream (SonarSource redirected it to
+        # sonarqube-scan-action), but pinned to its last release by commit SHA it
+        # remains a thin, stable wrapper around that action — kept here because
+        # it's the action named for this template's CI-parity work.
+        uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8 # v5.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
