@@ -21,6 +21,18 @@ file before touching code — it defines the boundary you must not cross and the
 
 ---
 
+## 0. Quick start for a fresh fork
+
+1. Use this template.
+2. Register the app with the kernel — [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
+3. Set env: `cp .env.example .env.local` and fill it in (the app refuses to start without
+   `IMAJIN_APP_DID` — see `instrumentation.ts`).
+4. `pnpm db:migrate` — this app's own Postgres schema only, see
+   [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
+5. `pnpm dev`.
+
+---
+
 ## 1. What Imajin is (the supporting framework)
 
 **Imajin (今人, "now-person") is the sovereign substrate this app runs on — not a library you import, a platform you
