@@ -111,3 +111,12 @@ jobs:
           else
             echo "No lint script — skipping."
           fi
+
+      - name: Typecheck (optional)
+        if: steps.detect.outputs.has_app == 'true'
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.typecheck ? 0 : 1)"; then
+            ${{ steps.pm.outputs.pm }} run typecheck
+          else
+            echo "No typecheck script — skipping."
+          fi
