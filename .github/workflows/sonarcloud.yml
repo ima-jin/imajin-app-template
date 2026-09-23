@@ -44,7 +44,7 @@ jobs:
 
       - name: Setup pnpm
         if: steps.detect.outputs.has_app == 'true'
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node
         if: steps.detect.outputs.has_app == 'true'
@@ -55,7 +55,10 @@ jobs:
 
       - name: Install dependencies
         if: steps.detect.outputs.has_app == 'true'
-        run: pnpm install --frozen-lockfile
+        # --ignore-scripts: this job only needs to run the test suite for
+        # coverage, not build native addons — no lifecycle script here is
+        # required for `pnpm run test:coverage` to succeed (verified locally).
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Generate coverage
         # Populates coverage/lcov.info (sonar.javascript.lcov.reportPaths). A
