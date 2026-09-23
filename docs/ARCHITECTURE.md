@@ -15,7 +15,7 @@
 
 External client only — app-auth headers (`X-App-DID` + `X-App-Authorization`) → kernel returns
 `{ appDid, userDid, scopes }`. No `workspace:*` deps, no monorepo internals, no DB, no in-process bus. Published
-`@imajin/*` SDK packages (GitHub Packages) are fine — see `AGENTS.md` §2. Domain events are emitted by calling the
+`@ima-jin/*` SDK packages (npmjs.org, no auth needed) are fine — see `AGENTS.md` §2. Domain events are emitted by calling the
 kernel's app-auth-gated domain API.
 
 ## Deploy convention

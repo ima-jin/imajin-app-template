@@ -8,7 +8,7 @@
 This repository **is the app** — a real, arms-length third-party application that composes the Imajin platform
 **only through its public app surface** (`requireAppAuth` + the documented kernel API). It holds **no `workspace:*`
 deps, no monorepo internals, no DB access, no in-process bus** — it talks to Imajin as an external client. Published
-`@imajin/*` SDK packages (from GitHub Packages, see `.npmrc`) are fine to depend on; they're the same versioned
+`@ima-jin/*` SDK packages (from npmjs.org, no auth needed) are fine to depend on; they're the same versioned
 artifact every app — first-party or third-party — consumes.
 
 ## Source of truth is the user's
@@ -47,32 +47,14 @@ The kernel verifies both and returns `{ appDid, userDid, scopes }` — that trip
    `/api/health` and `/api/spec` should respond immediately; `/api/me` returns your DID once
    you sign in through the header's "Sign in with Imajin" link.
 
-## Consuming `@imajin/*`
+## Consuming `@ima-jin/*`
 
-Published `@imajin/*` packages are served from GitHub Packages, not npmjs.org. The scope is already pinned in the
-committed [`.npmrc`](./.npmrc) (`@imajin:registry=https://npm.pkg.github.com`); it reads the auth token from
-`NODE_AUTH_TOKEN` — that variable is never committed.
+Published `@ima-jin/*` packages (e.g. `@ima-jin/auth-client`, `@ima-jin/config`, `@ima-jin/ui`) are served from
+npmjs.org, the default registry — no `.npmrc` scoping and no auth token needed to install them:
 
-- **Locally:** create a [GitHub personal access token](https://github.com/settings/tokens) with the `read:packages`
-  scope, then export it before installing:
-  ```bash
-  export NODE_AUTH_TOKEN=ghp_your_token_here
-  npm install
-  ```
-- **In CI (GitHub Actions):** no PAT needed — the workflow's own ephemeral `GITHUB_TOKEN` can read packages as long
-  as the job grants it, e.g.:
-  ```yaml
-  permissions:
-    packages: read
-  steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
-      with:
-        node-version-file: .nvmrc
-    - run: npm install
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  ```
+```bash
+pnpm add @ima-jin/auth-client
+```
 
 ## Layout
 
