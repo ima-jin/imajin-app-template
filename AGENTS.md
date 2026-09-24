@@ -21,6 +21,18 @@ file before touching code — it defines the boundary you must not cross and the
 
 ---
 
+## 0. Quick start for a fresh fork
+
+1. Use this template.
+2. Register the app with the kernel — [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
+3. Set env: `cp .env.example .env.local` and fill it in (the app refuses to start without
+   `IMAJIN_APP_DID` — see `instrumentation.ts`).
+4. `pnpm db:migrate` — this app's own Postgres schema only, see
+   [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
+5. `pnpm dev`.
+
+---
+
 ## 1. What Imajin is (the supporting framework)
 
 **Imajin (今人, "now-person") is the sovereign substrate this app runs on — not a library you import, a platform you
@@ -53,8 +65,8 @@ This app talks to Imajin as an **external client**. Hard rules, enforced in revi
   - `X-App-DID` — this app's DID (from registration)
   - `X-App-Authorization` — the attestation ID from the user's consent flow
   - The kernel verifies these and returns `{ appDid, userDid, scopes }`. That triple is your entire authority.
-- ✅ **Published `@imajin/*` packages are fine.** `@imajin/auth`, `@imajin/config`, `@imajin/logger`, `@imajin/ui`, …
-  installed from GitHub Packages (see `.npmrc`) are the SDK — every app, first-party or third-party, consumes the
+- ✅ **Published `@ima-jin/*` packages are fine.** `@ima-jin/auth-client`, `@ima-jin/config`, `@ima-jin/logger`, `@ima-jin/ui`, …
+  installed from npmjs.org (no auth needed) are the SDK — every app, first-party or third-party, consumes the
   same versioned artifact the same way. Depending on one is not a boundary violation.
 - ❌ **No `workspace:*` dependencies.** A `workspace:*` version range only resolves inside the monorepo. If you see
   one, this app has drifted back into being a monorepo package instead of an external client.
@@ -69,7 +81,7 @@ This app talks to Imajin as an **external client**. Hard rules, enforced in revi
 an attestation and must not touch kernel or app data stores.
 
 **Reference implementation: `ima-jin/imajin-scorecard`** — the clean 2nd-party pattern (Next.js, `jose` HS256 session
-cookie, `/api/auth/callback` handling the kernel redirect, published `@imajin/*` SDK only). Match its shape. Do
+cookie, `/api/auth/callback` handling the kernel redirect, published `@ima-jin/*` SDK only). Match its shape. Do
 **not** copy in-monorepo apps (coffee/dykil/learn) — those talk to the kernel over the same public contract as this
 app; if one looks privileged, that's the drift this template exists to close, not a pattern to imitate.
 
