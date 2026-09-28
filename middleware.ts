@@ -19,7 +19,13 @@ import { readKeystore, resolveKeystorePath } from '@ima-jin/auth-client';
  */
 export const config = {
   runtime: 'nodejs',
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+  // Two patterns, not one: with a non-empty `basePath` configured (see
+  // next.config.js), Next's compiled matcher wraps the catch-all capture
+  // group in a mandatory leading `/`, so the bare basePath root (no
+  // trailing path segment, e.g. `/dykil` with no trailing slash) fails to
+  // match `'/((?!…).*)'` alone and middleware silently never runs for it.
+  // `'/'` covers exactly that root; the catch-all covers everything else.
+  matcher: ['/', '/((?!_next/static|_next/image|favicon.ico).*)'],
 };
 
 /** Routes servable before this app has been claimed. Every other route gets the "not claimed yet" page. */
