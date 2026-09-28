@@ -32,11 +32,17 @@ function mockKernelFetch(path: string, responseBody: Record<string, unknown>) {
   return fetchMock;
 }
 
-describe('bootstrapSigningIdentity / getSigningIdentity', () => {
-  let workDir: string;
+/**
+ * Registers the shared temp-keystore-dir setup/teardown for a `describe`
+ * block (call at the top of the `describe` callback, same as writing the
+ * hooks inline) and returns an accessor for the current test's temp dir.
+ * Shared by both describe blocks below to avoid duplicating this verbatim.
+ */
+function useTempKeystoreDir(tmpPrefix: string): { dir: () => string } {
+  let workDir = '';
 
   beforeEach(async () => {
-    workDir = await mkdtemp(join(tmpdir(), 'imajin-keystore-'));
+    workDir = await mkdtemp(join(tmpdir(), tmpPrefix));
   });
 
   afterEach(async () => {
@@ -46,8 +52,14 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
     await rm(workDir, { recursive: true, force: true });
   });
 
+  return { dir: () => workDir };
+}
+
+describe('bootstrapSigningIdentity / getSigningIdentity', () => {
+  const tmp = useTempKeystoreDir('imajin-keystore-');
+
   it('first boot: exchanges a claim code for the signing key and persists a bootstrap keystore', async () => {
-    const keystorePath = join(workDir, 'keystore.json');
+    const keystorePath = join(tmp.dir(), 'keystore.json');
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
     vi.stubEnv('IMAJIN_APP_CLAIM_CODE', 'one-time-code');
@@ -72,7 +84,7 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
   });
 
   it('second boot: signs a challenge with the persisted bootstrap key and skips the claim code', async () => {
-    const keystorePath = join(workDir, 'keystore.json');
+    const keystorePath = join(tmp.dir(), 'keystore.json');
     writeKeystore(keystorePath, generateBootstrapKeypair());
 
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
@@ -97,7 +109,7 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
   });
 
   it('unclaimed boot mode (#2427): no keystore and no claim code boots without throwing', async () => {
-    const keystorePath = join(workDir, 'never-created.json');
+    const keystorePath = join(tmp.dir(), 'never-created.json');
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
     vi.stubEnv('IMAJIN_APP_CLAIM_CODE', '');
@@ -116,7 +128,7 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
   });
 
   it('still fails loud when a claim code IS provided but the kernel rejects it', async () => {
-    const keystorePath = join(workDir, 'never-created.json');
+    const keystorePath = join(tmp.dir(), 'never-created.json');
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
     vi.stubEnv('IMAJIN_APP_CLAIM_CODE', 'bad-code');
@@ -132,21 +144,10 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
 });
 
 describe('claimWithCode', () => {
-  let workDir: string;
-
-  beforeEach(async () => {
-    workDir = await mkdtemp(join(tmpdir(), 'imajin-claim-page-'));
-  });
-
-  afterEach(async () => {
-    resetSigningIdentityForTests();
-    vi.unstubAllEnvs();
-    vi.unstubAllGlobals();
-    await rm(workDir, { recursive: true, force: true });
-  });
+  const tmp = useTempKeystoreDir('imajin-claim-page-');
 
   it('hot-swaps the in-memory signing identity and persists a bootstrap keystore, without needing IMAJIN_APP_CLAIM_CODE', async () => {
-    const keystorePath = join(workDir, 'keystore.json');
+    const keystorePath = join(tmp.dir(), 'keystore.json');
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
     vi.stubEnv('IMAJIN_APP_CLAIM_CODE', '');

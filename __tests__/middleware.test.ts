@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 const { readKeystoreMock, resolveKeystorePathMock } = vi.hoisted(() => ({
   readKeystoreMock: vi.fn(),
@@ -11,8 +11,11 @@ vi.mock('@ima-jin/auth-client', () => ({
   resolveKeystorePath: resolveKeystorePathMock,
 }));
 
-function requestFor(path: string): NextRequest {
-  return new NextRequest(new URL(path, 'http://localhost:3000'));
+/** Runs the middleware for `path` with the given claim state, mocking only the on-disk keystore check. */
+async function middlewareFor(path: string, options: { claimed: boolean }): Promise<NextResponse> {
+  readKeystoreMock.mockReturnValue(options.claimed ? { publicKey: 'pub', privateKey: 'priv' } : null);
+  const { middleware } = await import('../middleware');
+  return middleware(new NextRequest(new URL(path, 'http://localhost:3000')));
 }
 
 describe('middleware', () => {
@@ -22,10 +25,7 @@ describe('middleware', () => {
   });
 
   it('serves the "not claimed yet" page for an ordinary route when unclaimed', async () => {
-    readKeystoreMock.mockReturnValue(null);
-    const { middleware } = await import('../middleware');
-
-    const response = middleware(requestFor('/'));
+    const response = await middlewareFor('/', { claimed: false });
 
     expect(response.status).toBe(200);
     const text = await response.text();
@@ -33,45 +33,30 @@ describe('middleware', () => {
   });
 
   it('passes /claim through when unclaimed', async () => {
-    readKeystoreMock.mockReturnValue(null);
-    const { middleware } = await import('../middleware');
-
-    const response = middleware(requestFor('/claim'));
+    const response = await middlewareFor('/claim', { claimed: false });
 
     expect(response.headers.get('x-middleware-next')).toBe('1');
   });
 
   it('passes /api/health and /api/claim through when unclaimed', async () => {
-    readKeystoreMock.mockReturnValue(null);
-    const { middleware } = await import('../middleware');
-
-    expect(middleware(requestFor('/api/health')).headers.get('x-middleware-next')).toBe('1');
-    expect(middleware(requestFor('/api/claim')).headers.get('x-middleware-next')).toBe('1');
+    expect((await middlewareFor('/api/health', { claimed: false })).headers.get('x-middleware-next')).toBe('1');
+    expect((await middlewareFor('/api/claim', { claimed: false })).headers.get('x-middleware-next')).toBe('1');
   });
 
   it('404s /claim once claimed', async () => {
-    readKeystoreMock.mockReturnValue({ publicKey: 'pub', privateKey: 'priv' });
-    const { middleware } = await import('../middleware');
-
-    const response = middleware(requestFor('/claim'));
+    const response = await middlewareFor('/claim', { claimed: true });
 
     expect(response.status).toBe(404);
   });
 
   it('404s /api/claim once claimed', async () => {
-    readKeystoreMock.mockReturnValue({ publicKey: 'pub', privateKey: 'priv' });
-    const { middleware } = await import('../middleware');
-
-    const response = middleware(requestFor('/api/claim'));
+    const response = await middlewareFor('/api/claim', { claimed: true });
 
     expect(response.status).toBe(404);
   });
 
   it('passes ordinary routes through once claimed', async () => {
-    readKeystoreMock.mockReturnValue({ publicKey: 'pub', privateKey: 'priv' });
-    const { middleware } = await import('../middleware');
-
-    const response = middleware(requestFor('/'));
+    const response = await middlewareFor('/', { claimed: true });
 
     expect(response.headers.get('x-middleware-next')).toBe('1');
   });

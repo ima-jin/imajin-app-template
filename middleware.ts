@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { readKeystore, resolveKeystorePath } from '@ima-jin/auth-client';
+import { withBasePath } from '@/lib/base-path';
 
 /**
  * Gates every route on this app's claim state (#2427). Runs on the Node.js
@@ -64,7 +65,10 @@ export function middleware(request: NextRequest): NextResponse {
   }
 
   if (!claimed && !ALLOWED_WHEN_UNCLAIMED.has(pathname)) {
-    const claimUrl = `${request.nextUrl.basePath}/claim`;
+    // Built from this app's own NEXT_PUBLIC_BASE_PATH config (`withBasePath`,
+    // shared with `app/claim/page.tsx`) rather than `request.nextUrl` —
+    // config, never request input, ever ends up in this HTML string.
+    const claimUrl = withBasePath('/claim');
     return htmlResponse(
       200,
       'Not claimed yet',
