@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateBootstrapKeypair, writeKeystore } from '@ima-jin/auth-client';
-import { bootstrapSigningIdentity, getSigningIdentity, resetSigningIdentityForTests } from '../signing-identity';
+import {
+  bootstrapSigningIdentity,
+  claimWithCode,
+  getSigningIdentity,
+  isAppClaimed,
+  resetSigningIdentityForTests,
+} from '../signing-identity';
 
 const KERNEL_URL = 'https://dev-jin.imajin.test';
 
@@ -59,6 +65,7 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
       privateKey: 'signing-private-key-hex',
       publicKey: 'signing-public-key-hex',
     });
+    expect(isAppClaimed()).toBe(true);
 
     const keystoreStat = await stat(keystorePath);
     expect(keystoreStat.mode & 0o777).toBe(0o600);
@@ -81,6 +88,7 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
     await bootstrapSigningIdentity();
 
     expect(getSigningIdentity().appDid).toBe('did:imajin:app-under-test');
+    expect(isAppClaimed()).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, requestInit] = fetchMock.mock.calls[0];
     const requestBody = JSON.parse(requestInit?.body as string);
@@ -88,7 +96,7 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
     expect(typeof requestBody.signature).toBe('string');
   });
 
-  it('no keystore and no claim code: throws a clear, actionable error instead of hanging or crashing unsigned', async () => {
+  it('unclaimed boot mode (#2427): no keystore and no claim code boots without throwing', async () => {
     const keystorePath = join(workDir, 'never-created.json');
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
@@ -101,8 +109,62 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
       })
     );
 
-    await expect(bootstrapSigningIdentity()).rejects.toThrow(/no keystore found/i);
-    await expect(bootstrapSigningIdentity()).rejects.toThrow(/IMAJIN_APP_CLAIM_CODE/);
+    await expect(bootstrapSigningIdentity()).resolves.toBeUndefined();
+
+    expect(isAppClaimed()).toBe(false);
     expect(() => getSigningIdentity()).toThrow(/not bootstrapped yet/);
+  });
+
+  it('still fails loud when a claim code IS provided but the kernel rejects it', async () => {
+    const keystorePath = join(workDir, 'never-created.json');
+    vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
+    vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
+    vi.stubEnv('IMAJIN_APP_CLAIM_CODE', 'bad-code');
+    vi.stubEnv('IMAJIN_APP_DID', '');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'Unrecognized claim code' }), { status: 404 }))
+    );
+
+    await expect(bootstrapSigningIdentity()).rejects.toThrow();
+    expect(isAppClaimed()).toBe(false);
+  });
+});
+
+describe('claimWithCode', () => {
+  let workDir: string;
+
+  beforeEach(async () => {
+    workDir = await mkdtemp(join(tmpdir(), 'imajin-claim-page-'));
+  });
+
+  afterEach(async () => {
+    resetSigningIdentityForTests();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    await rm(workDir, { recursive: true, force: true });
+  });
+
+  it('hot-swaps the in-memory signing identity and persists a bootstrap keystore, without needing IMAJIN_APP_CLAIM_CODE', async () => {
+    const keystorePath = join(workDir, 'keystore.json');
+    vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
+    vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
+    vi.stubEnv('IMAJIN_APP_CLAIM_CODE', '');
+    mockKernelFetch('/api/apps/claim', {
+      appDid: 'did:imajin:app-under-test',
+      privateKey: 'signing-private-key-hex',
+      publicKey: 'signing-public-key-hex',
+    });
+
+    expect(isAppClaimed()).toBe(false);
+
+    const identity = await claimWithCode({ claimCode: 'operator-pasted-code' });
+
+    expect(identity.appDid).toBe('did:imajin:app-under-test');
+    expect(isAppClaimed()).toBe(true);
+    expect(getSigningIdentity()).toEqual(identity);
+
+    const keystoreStat = await stat(keystorePath);
+    expect(keystoreStat.mode & 0o777).toBe(0o600);
   });
 });
