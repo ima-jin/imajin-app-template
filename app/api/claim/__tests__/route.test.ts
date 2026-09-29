@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -106,5 +107,63 @@ describe('POST /api/claim', () => {
     );
 
     expect(response.status).toBe(429);
+  });
+
+  it('keys the rate limit on the trusted LAST X-Forwarded-For hop, not the spoofable leading one', async () => {
+    mockKernelClaim({ error: 'Unrecognized claim code' }, 404);
+
+    // A different, attacker-controlled leading hop on every request, but the
+    // same trailing hop — the one this app's own front-door proxy actually
+    // appends. If the limiter (still, wrongly) keyed on the first hop, this
+    // loop would never trip the limit at all.
+    for (let attempt = 0; attempt < RATE_LIMIT; attempt += 1) {
+      await POST(
+        postRequest({ claimCode: `attempt-${attempt}` }, { 'x-forwarded-for': `10.0.0.${attempt}, 203.0.113.5` }) as never
+      );
+    }
+    const response = await POST(
+      postRequest({ claimCode: 'one-attempt-too-many' }, { 'x-forwarded-for': '10.0.0.99, 203.0.113.5' }) as never
+    );
+
+    expect(response.status).toBe(429);
+  });
+
+  it('prefers x-real-ip over x-forwarded-for when both are present', async () => {
+    mockKernelClaim({ error: 'Unrecognized claim code' }, 404);
+
+    for (let attempt = 0; attempt < RATE_LIMIT; attempt += 1) {
+      await POST(
+        postRequest(
+          { claimCode: `attempt-${attempt}` },
+          { 'x-real-ip': '198.51.100.7', 'x-forwarded-for': `10.0.0.${attempt}` }
+        ) as never
+      );
+    }
+    const response = await POST(
+      postRequest(
+        { claimCode: 'one-attempt-too-many' },
+        { 'x-real-ip': '198.51.100.7', 'x-forwarded-for': '10.0.0.99' }
+      ) as never
+    );
+
+    expect(response.status).toBe(429);
+  });
+
+  it('refuses a claim whose kernel-returned appDid does not match IMAJIN_APP_DID, and persists nothing', async () => {
+    vi.stubEnv('IMAJIN_APP_DID', 'did:imajin:this-app');
+    mockKernelClaim({
+      appDid: 'did:imajin:a-different-app',
+      privateKey: 'signing-private-key-hex',
+      publicKey: 'signing-public-key-hex',
+    });
+
+    const response = await POST(postRequest({ claimCode: 'operator-pasted-code' }) as never);
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body.expectedAppDid).toBe('did:imajin:this-app');
+    expect(body.claimedAppDid).toBe('did:imajin:a-different-app');
+    expect(body.error).not.toContain('operator-pasted-code');
+    expect(existsSync(join(workDir, 'keystore.json'))).toBe(false);
   });
 });

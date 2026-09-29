@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateBootstrapKeypair, writeKeystore } from '@ima-jin/auth-client';
 import {
+  AppDidMismatchError,
   bootstrapSigningIdentity,
   claimWithCode,
   getSigningIdentity,
@@ -167,5 +168,22 @@ describe('claimWithCode', () => {
 
     const keystoreStat = await stat(keystorePath);
     expect(keystoreStat.mode & 0o777).toBe(0o600);
+  });
+
+  it('refuses a claim whose kernel-returned appDid does not match IMAJIN_APP_DID, and undoes the keystore write', async () => {
+    const keystorePath = join(tmp.dir(), 'keystore.json');
+    vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
+    vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
+    vi.stubEnv('IMAJIN_APP_DID', 'did:imajin:this-app');
+    mockKernelFetch('/api/apps/claim', {
+      appDid: 'did:imajin:a-different-app',
+      privateKey: 'signing-private-key-hex',
+      publicKey: 'signing-public-key-hex',
+    });
+
+    await expect(claimWithCode({ claimCode: 'operator-pasted-code' })).rejects.toThrow(AppDidMismatchError);
+
+    expect(isAppClaimed()).toBe(false);
+    await expect(stat(keystorePath)).rejects.toThrow();
   });
 });

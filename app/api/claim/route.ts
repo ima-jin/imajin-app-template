@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { claimWithCode, isAppClaimed } from '@/lib/signing-identity';
-import { isRateLimited, recordAttempt } from '@/lib/claim-rate-limit';
+import { AppDidMismatchError, claimWithCode, isAppClaimed } from '@/lib/signing-identity';
+import { isRateLimited, recordAttempt, UNKNOWN_CLIENT_KEY } from '@/lib/claim-rate-limit';
 
 /**
  * POST /api/claim — the operator `/claim` page's server-side counterpart
@@ -22,13 +22,33 @@ interface ClaimRequestBody {
   claimCode?: unknown;
 }
 
+/**
+ * Resolves the caller's address to key the rate limiter on. Trusts only the
+ * hop OUR OWN front-door reverse proxy appends — `x-real-ip` when the proxy
+ * sets it, else the LAST `x-forwarded-for` hop — never the first: an
+ * attacker controls every hop before the proxy's own, including the first
+ * one a naive reader would reach for, and can bypass a per-key limit
+ * entirely just by sending a fresh fabricated leading hop on every request.
+ * Falls back to `UNKNOWN_CLIENT_KEY` (its own, separately-capped bucket —
+ * see `claim-rate-limit.ts`) when neither header is present at all.
+ */
 function clientKeyFor(request: NextRequest): string {
-  const forwardedFor = request.headers.get('x-forwarded-for');
-  const firstHop = forwardedFor?.split(',')[0]?.trim();
-  if (firstHop) {
-    return firstHop;
+  const realIp = request.headers.get('x-real-ip')?.trim();
+  if (realIp) {
+    return realIp;
   }
-  return 'unknown';
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  if (forwardedFor) {
+    const hops = forwardedFor
+      .split(',')
+      .map((hop) => hop.trim())
+      .filter((hop) => hop.length > 0);
+    const lastHop = hops.at(-1);
+    if (lastHop) {
+      return lastHop;
+    }
+  }
+  return UNKNOWN_CLIENT_KEY;
 }
 
 function validateClaimBody(body: ClaimRequestBody): { ok: true; claimCode: string } | { ok: false; error: string } {
@@ -69,6 +89,18 @@ export async function POST(request: NextRequest) {
     const identity = await claimWithCode({ claimCode: validation.claimCode });
     return NextResponse.json({ appDid: identity.appDid, publicKey: identity.publicKey });
   } catch (error) {
+    if (error instanceof AppDidMismatchError) {
+      // Both DIDs are public identifiers, never key material — safe to
+      // return and to have logged, though nothing here logs them anyway.
+      return NextResponse.json(
+        {
+          error: 'This claim code was issued for a different app — ask the operator to re-approve with a fresh code',
+          expectedAppDid: error.expectedAppDid,
+          claimedAppDid: error.claimedAppDid,
+        },
+        { status: 409 }
+      );
+    }
     // Deliberately logs only a fixed message — never the claim code, and
     // never the raw kernel error body (which could echo request input).
     console.error(

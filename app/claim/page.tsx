@@ -8,6 +8,13 @@ import { withBasePath } from '@/lib/base-path';
  * approval card opens: paste the one-time claim code here instead of
  * ssh-ing in to edit an env file. Only reachable while this app is
  * unclaimed; `middleware.ts` 404s this route once the claim succeeds.
+ *
+ * No client-side "which app is this" confirmation field: `/api/claim`
+ * itself verifies the kernel-returned `appDid` against this app's own
+ * `IMAJIN_APP_DID` and refuses (409) a code issued for a different app
+ * before ever adopting it — see `src/lib/signing-identity.ts`'s
+ * `claimWithCode()`. A browser-only check couldn't run until after the
+ * (single-use) code was already spent, so it added no real protection.
  */
 
 interface ClaimResult {
@@ -40,7 +47,6 @@ function errorMessageFrom(body: ClaimResponseBody): string {
 
 export default function ClaimPage() {
   const [claimCode, setClaimCode] = useState('');
-  const [expectedAppDid, setExpectedAppDid] = useState('');
   const [formState, setFormState] = useState<ClaimFormState>({ status: 'idle' });
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -71,7 +77,7 @@ export default function ClaimPage() {
   }
 
   if (formState.status === 'success') {
-    return <ClaimSuccessView result={formState.result} expectedAppDid={expectedAppDid} />;
+    return <ClaimSuccessView result={formState.result} />;
   }
 
   return (
@@ -97,20 +103,6 @@ export default function ClaimPage() {
             className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-white"
           />
         </div>
-        <div>
-          <label htmlFor="expectedAppDid" className="block text-sm font-medium text-gray-300">
-            App DID <span className="text-gray-500">(optional — from the card, to confirm)</span>
-          </label>
-          <input
-            id="expectedAppDid"
-            name="expectedAppDid"
-            type="text"
-            autoComplete="off"
-            value={expectedAppDid}
-            onChange={(event) => setExpectedAppDid(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-white"
-          />
-        </div>
         {formState.status === 'error' && <p className="text-sm text-red-400">{formState.message}</p>}
         <button
           type="submit"
@@ -124,9 +116,7 @@ export default function ClaimPage() {
   );
 }
 
-function ClaimSuccessView({ result, expectedAppDid }: Readonly<{ result: ClaimResult; expectedAppDid: string }>) {
-  const mismatch = expectedAppDid.length > 0 && expectedAppDid !== result.appDid;
-
+function ClaimSuccessView({ result }: Readonly<{ result: ClaimResult }>) {
   return (
     <div className="mx-auto max-w-md px-4 py-12">
       <h1 className="text-2xl font-semibold text-white">App claimed</h1>
@@ -145,11 +135,6 @@ function ClaimSuccessView({ result, expectedAppDid }: Readonly<{ result: ClaimRe
           </div>
         )}
       </dl>
-      {mismatch && (
-        <p className="mt-4 text-sm text-amber-400">
-          Heads up: this doesn&apos;t match the App DID you entered above — double-check you claimed the right app.
-        </p>
-      )}
     </div>
   );
 }
