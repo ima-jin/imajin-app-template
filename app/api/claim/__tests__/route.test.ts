@@ -128,21 +128,24 @@ describe('POST /api/claim', () => {
     expect(response.status).toBe(429);
   });
 
-  it('prefers x-real-ip over x-forwarded-for when both are present', async () => {
+  it('ignores a spoofed x-real-ip header and still rate-limits by last XFF hop', async () => {
     mockKernelClaim({ error: 'Unrecognized claim code' }, 404);
 
+    // A fresh fabricated x-real-ip on every request, but the same trailing
+    // x-forwarded-for hop. If the limiter trusted x-real-ip, every request
+    // would land in its own bucket and this loop would never trip the limit.
     for (let attempt = 0; attempt < RATE_LIMIT; attempt += 1) {
       await POST(
         postRequest(
           { claimCode: `attempt-${attempt}` },
-          { 'x-real-ip': '198.51.100.7', 'x-forwarded-for': `10.0.0.${attempt}` }
+          { 'x-real-ip': `198.51.100.${attempt}`, 'x-forwarded-for': '203.0.113.5' }
         ) as never
       );
     }
     const response = await POST(
       postRequest(
         { claimCode: 'one-attempt-too-many' },
-        { 'x-real-ip': '198.51.100.7', 'x-forwarded-for': '10.0.0.99' }
+        { 'x-real-ip': '198.51.100.99', 'x-forwarded-for': '203.0.113.5' }
       ) as never
     );
 
