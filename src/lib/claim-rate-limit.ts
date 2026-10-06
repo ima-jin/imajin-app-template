@@ -10,15 +10,17 @@ const MAX_ATTEMPTS_PER_WINDOW = 5;
 
 /**
  * `clientKeyFor()` (`app/api/claim/route.ts`) falls back to this sentinel
- * when it cannot resolve any client address at all (no `x-real-ip`, no
- * `x-forwarded-for` — a deployment not sitting behind a proxy that sets
- * either). Every such caller shares this one bucket, so it gets its own,
+ * when it cannot resolve any client address at all (no usable
+ * `x-forwarded-for` — a deployment not sitting behind a front-door proxy
+ * that sets it; `x-real-ip` is never consulted because it is client-
+ * controlled). Every such caller shares this one bucket, so it gets its own,
  * much higher cap: a low cap here would let a single attacker with no
  * resolvable address exhaust the shared bucket and lock out the real
  * operator hitting the very same bucket. This is a documented, intentionally
  * coarse stopgap for that degraded case — the real fix is running behind a
- * proxy that sets one of those headers, which every deployment of this app
- * is expected to (see docs/REGISTRATION.md).
+ * front door that sets `X-Forwarded-For` and keeping the app port
+ * unreachable except through it (see docs/REGISTRATION.md, "Proxy trust
+ * assumption").
  */
 export const UNKNOWN_CLIENT_KEY = 'unknown';
 const MAX_ATTEMPTS_PER_WINDOW_UNKNOWN = 50;

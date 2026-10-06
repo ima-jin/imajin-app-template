@@ -13,6 +13,11 @@ import {
 } from '../signing-identity';
 
 const KERNEL_URL = 'https://dev-jin.imajin.test';
+const SIGNING_IDENTITY_KEY = Symbol.for('imajin.app.signingIdentity');
+
+interface GlobalIdentitySlot {
+  [SIGNING_IDENTITY_KEY]?: unknown;
+}
 
 /** Builds a fetch mock that only answers the given kernel path, and records every call. */
 function mockKernelFetch(path: string, responseBody: Record<string, unknown>) {
@@ -107,6 +112,51 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
     const requestBody = JSON.parse(requestInit?.body as string);
     expect(requestBody).toMatchObject({ appDid: 'did:imajin:app-under-test' });
     expect(typeof requestBody.signature).toBe('string');
+  });
+
+  it('shares the identity across separately-loaded module copies (instrumentation.ts vs route bundles)', async () => {
+    const keystorePath = join(tmp.dir(), 'keystore.json');
+    writeKeystore(keystorePath, generateBootstrapKeypair());
+    vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
+    vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
+    vi.stubEnv('IMAJIN_APP_CLAIM_CODE', '');
+    vi.stubEnv('IMAJIN_APP_DID', 'did:imajin:app-under-test');
+    mockKernelFetch('/api/apps/signing-key/fetch', {
+      appDid: 'did:imajin:app-under-test',
+      privateKey: 'signing-private-key-hex',
+      publicKey: 'signing-public-key-hex',
+    });
+
+    // Copy A stands in for the bundle `instrumentation.ts` boots from...
+    vi.resetModules();
+    const instrumentationCopy = await import('../signing-identity');
+    await instrumentationCopy.bootstrapSigningIdentity();
+
+    // ...copy B for a distinct route bundle: a fresh module instance with its own module scope.
+    vi.resetModules();
+    const routeCopy = await import('../signing-identity');
+    expect(routeCopy).not.toBe(instrumentationCopy);
+
+    expect(routeCopy.isAppClaimed()).toBe(true);
+    expect(routeCopy.getSigningIdentity().appDid).toBe('did:imajin:app-under-test');
+  });
+
+  it('reads the identity from the Symbol.for(imajin.app.signingIdentity) slot on globalThis', () => {
+    const fixtureIdentity = {
+      appDid: 'did:imajin:app-under-test',
+      privateKey: 'fixture-private',
+      publicKey: 'fixture-public',
+    };
+    expect(isAppClaimed()).toBe(false);
+
+    (globalThis as GlobalIdentitySlot)[SIGNING_IDENTITY_KEY] = fixtureIdentity;
+
+    expect(isAppClaimed()).toBe(true);
+    expect(getSigningIdentity()).toBe(fixtureIdentity);
+
+    resetSigningIdentityForTests();
+    expect(isAppClaimed()).toBe(false);
+    expect((globalThis as GlobalIdentitySlot)[SIGNING_IDENTITY_KEY]).toBeNull();
   });
 
   it('unclaimed boot mode (#2427): no keystore and no claim code boots without throwing', async () => {

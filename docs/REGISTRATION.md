@@ -103,6 +103,22 @@ This is only possible because this app boots in **unclaimed mode** when neither 
 `/api/claim`, and `/api/health` serves a minimal "not claimed yet" page, and `/api/health` reports
 `{ claimed: false }`.
 
+### Proxy trust assumption (rate limiting on `/claim`)
+
+`POST /api/claim` is rate limited per client address, and the only address it trusts is the
+**last** hop of `X-Forwarded-For` — the one appended by this app's own front door. That is only
+sound if both of these hold:
+
+- **The front door must set `X-Forwarded-For`.** Caddy's `reverse_proxy` does this by default
+  (with no `trusted_proxies` configured, it discards any client-supplied value and appends the
+  real peer address). Any other proxy must be configured to do the same. `x-real-ip` is never
+  consulted — a proxy does not overwrite it, so it is fully client-controlled.
+- **The app port must not be directly reachable.** Bind it to localhost or a private network
+  and firewall it, so every request arrives through the front door. A client that can reach the
+  port directly can send any `X-Forwarded-For` it likes and sidestep the per-address limit.
+
+Without a usable `X-Forwarded-For`, all callers share one coarse fallback bucket.
+
 ### The advanced / CI path: an env var
 
 Automated deploys (a CI/seal pipeline, see `IMAJIN_APP_CLAIM_CODE` in `.env.example`) can still set
