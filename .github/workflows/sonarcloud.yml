@@ -38,14 +38,20 @@ name: SonarCloud
 # Trusted scanner configuration (ima-jin/imajin-app-template#15): the artifact
 # is still PR-authored, so the scanner must never trust anything in it that
 # steers where SONAR_TOKEN goes. The privileged job therefore (1) overwrites the
-# payload's sonar-project.properties with the default branch's copy (sparse
-# checkout of that one file — no PR code), (2) passes the server URLs,
+# payload's sonar-project.properties with the default branch's copy (fetched as
+# that one file through the contents API with `gh api` — no `actions/checkout`,
+# no PR code, in the privileged job; ima-jin/imajin-app-template#17), (2) passes the server URLs,
 # organization and projectKey as -D args (hardcoded / read from that trusted
 # copy, never from the payload; CLI beats any file), (3) validates the PR head
 # SHA and passes it as sonar.scm.revision, and (4) scans with
 # SonarSource/sonarqube-scan-action pinned by commit SHA. The `run:` blocks of
 # the steps below are executed against a hostile payload fixture by
 # scripts/check-sonar-trust.sh (.github/workflows/sonar-trust-check.yml).
+#
+# Permissions are declared per job (ima-jin/imajin-app-template#17), each the
+# minimum that job needs; there is deliberately no workflow-level block and no
+# `pull-requests: write` (PR decoration is done server-side by the SonarCloud
+# GitHub App).
 
 on:
   push:
@@ -54,16 +60,13 @@ on:
     workflows: ['CI']
     types: [completed]
 
-permissions:
-  contents: read
-  pull-requests: write
-  actions: read # to download the sonar-payload artifact from the triggering CI run
-
 jobs:
   sonarcloud-push:
     if: github.event_name == 'push'
     name: SonarCloud
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # actions/checkout of this repo
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
@@ -138,6 +141,9 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
     name: SonarCloud
     runs-on: ubuntu-latest
+    permissions:
+      actions: read # download the sonar-payload artifact from the triggering CI run
+      contents: read # read sonar-project.properties from the default branch via the contents API
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
@@ -164,7 +170,12 @@ jobs:
         # overwrites main with PR code (ima-jin/imajin-app-template#10).
         # The file comes from an artifact built by PR-authored code, so treat
         # every value as untrusted and allow-list its characters before it
-        # reaches the scanner args.
+        # reaches the scanner args. The head SHA is additionally asserted equal
+        # to the triggering CI run's own head commit (workflow_run.head_sha, set
+        # by GitHub, not by the artifact), so the artifact can't point the scan
+        # at a different revision than the one CI actually built.
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           meta=sonar-payload/sonar-pr-meta.json
           if [ ! -s "$meta" ]; then
@@ -185,6 +196,10 @@ jobs:
             echo "::error::Missing or invalid head SHA in PR metadata (expected exactly 40 hex characters)."
             exit 1
           fi
+          if [ "${headSha,,}" != "${EXPECTED_HEAD_SHA,,}" ]; then
+            echo "::error::Head SHA in PR metadata does not match the triggering CI run's head commit."
+            exit 1
+          fi
           for ref in "$headRef" "$baseRef"; do
             if ! [[ "$ref" =~ ^[A-Za-z0-9._/-]+$ ]]; then
               echo "::error::Missing or unsafe branch name in PR metadata."
@@ -198,16 +213,22 @@ jobs:
             echo "headSha=${headSha,,}"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Checkout trusted Sonar properties
-        # Default branch only, and ONLY this one file (sparse checkout) — still
-        # no PR code on disk. Written to its own directory, outside the payload.
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          sparse-checkout: sonar-project.properties
-          sparse-checkout-cone-mode: false
-          path: sonar-trusted
-          persist-credentials: false
+      - name: Fetch trusted Sonar properties
+        id: trusted
+        # Default branch only, and ONLY this one file, through the contents API
+        # (`gh api`, preinstalled on the runner) — no actions/checkout in this
+        # privileged job, no PR code on disk. Written to its own directory,
+        # outside the payload. The repository and default branch come from the
+        # event context via env:, never interpolated into the script text.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          mkdir -p sonar-trusted
+          gh api -H "Accept: application/vnd.github.raw+json" \
+            "repos/$REPO/contents/sonar-project.properties?ref=$DEFAULT_BRANCH" \
+            > sonar-trusted/sonar-project.properties
 
       - name: Pin trusted scanner properties
         id: scan_args
