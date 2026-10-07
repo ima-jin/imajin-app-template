@@ -54,7 +54,7 @@ how this app actually obtains its signing key.
 | `tier` | Always `third_party` for self-service registration. `first_party` is reserved for the kernel's own admin surface — every app forked from this template, including Imajin's own extractions (dykil, links, …), registers the same way, at the same tier. |
 | `requestedScopes` | Clamped server-side to the kernel's declarative scope vocabulary — you cannot register an ad-hoc scope string. |
 | `allowedRedirectHosts` | Seeded from `callbackUrl`'s origin. The kernel will only ever redirect a signed-in user back to a host in this set. |
-| `tokenAudiences` | Starts empty. Irrelevant to this template's session/cookie flow (`getSession`, the `/api/auth/*` routes) — it only matters if you later adopt scoped app-tokens (`requireSessionOrAppToken`-style, host-scoped) instead of, or in addition to, the shared session cookie. |
+| `tokenAudiences` | This app's slug (`apps.provision` writes `[slug]`; no post-provision edit). **Never the shared host** (`jin.imajin.ai` / `dev-jin.imajin.ai`) — every path-routed app shares it, so apps would accept each other's tokens (imajin-ai#2706). Scoped app tokens (`Authorization: Bearer`, e.g. agents / MCP clients) are verified by `authenticate()` (`src/lib/auth/authenticate.ts`, `@ima-jin/auth`'s `requireSessionOrAppToken`) against this slug — `APP_SLUG` in `src/lib/app-slug.ts` is `package.json` `name`, which the rename step sets to the slug; `IMAJIN_APP_AUD` overrides it. Irrelevant to the session/cookie flow (`getSession`, the `/api/auth/*` routes). |
 
 `id` (the `app_...` registry id, not the DID) is what you set as `NEXT_PUBLIC_IMAJIN_APP_ID` —
 it's what the "Sign in with Imajin" redirect uses client-side.
