@@ -4,11 +4,15 @@
 # A `workflow_run` workflow always runs from the default branch, so the
 # privileged `sonarcloud-pr` job cannot run on the PR that changes it. This
 # script instead extracts that job's OWN `run:` blocks from
-# .github/workflows/sonarcloud.yml (steps `pr` and `scan_args`) and executes
-# them, exactly as the runner would (bash --noprofile --norc -eo pipefail),
-# against a hostile payload fixture. It asserts the effective scanner args
-# still point at sonarcloud.io under the trusted organization/projectKey, and
-# that malformed metadata is refused.
+# .github/workflows/sonarcloud.yml (steps `pr`, `trusted` and `scan_args`) and
+# executes them, exactly as the runner would (bash --noprofile --norc -eo
+# pipefail), against a hostile payload fixture. The `trusted` step fetches the
+# default branch's sonar-project.properties with `gh api`; there is no network
+# here, so `gh` is replaced by a stub that serves the trusted fixture and logs
+# its arguments (#17). It asserts the effective scanner args still point at
+# sonarcloud.io under the trusted organization/projectKey, that malformed
+# metadata is refused, and that a head SHA differing from the triggering CI
+# run's head commit is refused.
 #
 # Needs: bash, jq, yq (mikefarah, preinstalled on GitHub's ubuntu runners).
 # Runs from any directory; no secrets, no network.
@@ -22,6 +26,23 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 failures=0
+good_sha=0123456789abcdef0123456789abcdef01234567
+
+# Stub `gh`: logs its arguments and serves the trusted fixture on stdout, the
+# way `gh api -H 'Accept: application/vnd.github.raw+json' .../contents/...`
+# returns the raw file. GH_STUB_FAIL=1 makes it fail like an API error.
+mkdir -p "$work/bin"
+cat >"$work/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$GH_STUB_LOG"
+if [[ "${GH_STUB_FAIL:-}" == "1" ]]; then
+  echo "gh: HTTP 404" >&2
+  exit 1
+fi
+cat "$GH_STUB_FIXTURE"
+exit 0
+STUB
+chmod +x "$work/bin/gh"
 
 fail() {
   local message=$1
@@ -42,11 +63,13 @@ step_run() {
   return 0
 }
 
-# Executes a job step script the way the runner does. Args: <script> <dir> <output-file>.
+# Executes a job step script the way the runner does. Args: <script> <dir> <output-file> [VAR=value...].
+# EXPECTED_HEAD_SHA defaults to the fixture SHA; extra VAR=value args override it.
 run_step() {
   local script=$1 dir=$2 out=$3
   shift 3
-  (cd "$dir" && env GITHUB_OUTPUT="$out" "$@" bash --noprofile --norc -eo pipefail -c "$script") >"$dir/step.log" 2>&1
+  (cd "$dir" && env GITHUB_OUTPUT="$out" EXPECTED_HEAD_SHA="$good_sha" PATH="$work/bin:$PATH" \
+    GH_STUB_LOG="$dir/gh.log" GH_STUB_FIXTURE="$fixtures/trusted/sonar-project.properties" "$@" bash --noprofile --norc -eo pipefail -c "$script") >"$dir/step.log" 2>&1
   return $?
 }
 
@@ -67,9 +90,10 @@ new_workspace() {
 }
 
 pr_script=$(step_run pr)
+trusted_script=$(step_run trusted)
 args_script=$(step_run scan_args)
-if [[ -z "$pr_script" || -z "$args_script" ]]; then
-  echo "FAIL: could not extract steps 'pr' and 'scan_args' from $workflow" >&2
+if [[ -z "$pr_script" || -z "$trusted_script" || -z "$args_script" ]]; then
+  echo "FAIL: could not extract steps 'pr', 'trusted' and 'scan_args' from $workflow" >&2
   exit 1
 fi
 
@@ -78,6 +102,30 @@ if yq '.jobs.sonarcloud-pr.steps[].run // ""' "$workflow" | grep -qF '${{'; then
   fail "a sonarcloud-pr run: block interpolates \${{ }} (untrusted input must go through env:)"
 else
   pass "no \${{ }} interpolation inside sonarcloud-pr run: blocks"
+fi
+
+if [[ "$(yq '[.jobs.sonarcloud-pr.steps[].uses // "" | select(test("^actions/checkout"))] | length' "$workflow")" == "0" ]]; then
+  pass "no actions/checkout in the privileged sonarcloud-pr job"
+else
+  fail "sonarcloud-pr runs actions/checkout (fetch the trusted file with gh api instead)"
+fi
+
+if [[ "$(yq '.permissions // ""' "$workflow")" == "" ]]; then
+  pass "no workflow-level permissions (declared per job)"
+else
+  fail "workflow-level permissions block present (declare permissions per job)"
+fi
+for job in $(yq '.jobs | keys | .[]' "$workflow"); do
+  if [[ "$(yq ".jobs.\"$job\".permissions // \"\"" "$workflow")" == "" ]]; then
+    fail "job $job declares no permissions of its own"
+  else
+    pass "job $job declares its own permissions"
+  fi
+done
+if [[ "$(yq '[.jobs[].permissions // {} | to_entries | .[] | select(.key == "pull-requests" and .value == "write")] | length' "$workflow")" == "0" ]]; then
+  pass "no job requests pull-requests: write"
+else
+  fail "a job requests pull-requests: write"
 fi
 
 scan_uses=$(yq '.jobs.sonarcloud-pr.steps[] | select(.name == "SonarCloud Scan") | .uses' "$workflow")
@@ -91,6 +139,33 @@ if [[ "$(yq '.jobs.sonarcloud-pr.steps[] | select(.name == "SonarCloud Scan") | 
   pass "scan step does not receive GITHUB_TOKEN"
 else
   fail "scan step receives GITHUB_TOKEN"
+fi
+
+# ── Trusted properties are fetched with `gh api` from the default branch ─────
+ws=$(mktemp -d -p "$work")
+cp -r "$fixtures/hostile-payload" "$ws/sonar-payload"
+: >"$ws/out"
+if run_step "$trusted_script" "$ws" "$ws/out" GH_TOKEN=dummy REPO=ima-jin/example DEFAULT_BRANCH=trunk; then
+  if cmp -s "$ws/sonar-trusted/sonar-project.properties" "$fixtures/trusted/sonar-project.properties"; then
+    pass "trusted properties written to sonar-trusted/ from the contents API response"
+  else
+    fail "sonar-trusted/sonar-project.properties differs from the API response"
+  fi
+  if grep -qxF "api -H Accept: application/vnd.github.raw+json repos/ima-jin/example/contents/sonar-project.properties?ref=trunk" "$ws/gh.log"; then
+    pass "gh api requests the raw file from the default branch of this repository"
+  else
+    fail "unexpected gh invocation: $(cat "$ws/gh.log")"
+  fi
+else
+  fail "trusted fetch failed unexpectedly: $(cat "$ws/step.log")"
+fi
+
+ws=$(mktemp -d -p "$work")
+: >"$ws/out"
+if run_step "$trusted_script" "$ws" "$ws/out" GH_TOKEN=dummy REPO=ima-jin/example DEFAULT_BRANCH=trunk GH_STUB_FAIL=1; then
+  fail "trusted fetch succeeded although gh api failed"
+else
+  pass "trusted fetch fails when gh api fails (no scan without trusted properties)"
 fi
 
 # ── Hostile payload ──────────────────────────────────────────────────────────
@@ -174,7 +249,6 @@ meta_case() {
   return 0
 }
 
-good_sha=0123456789abcdef0123456789abcdef01234567
 meta_case "SHA too short" "{\"prNumber\":1,\"headSha\":\"abc123\",\"headRef\":\"a\",\"baseRef\":\"main\"}"
 meta_case "SHA 41 chars" "{\"prNumber\":1,\"headSha\":\"${good_sha}0\",\"headRef\":\"a\",\"baseRef\":\"main\"}"
 meta_case "SHA non-hex" "{\"prNumber\":1,\"headSha\":\"${good_sha:0:39}z\",\"headRef\":\"a\",\"baseRef\":\"main\"}"
@@ -182,6 +256,24 @@ meta_case "SHA with injection" "{\"prNumber\":1,\"headSha\":\"${good_sha:0:30}; 
 meta_case "SHA missing" "{\"prNumber\":1,\"headRef\":\"a\",\"baseRef\":\"main\"}"
 meta_case "unsafe branch name" "{\"prNumber\":1,\"headSha\":\"$good_sha\",\"headRef\":\"a b\$(id)\",\"baseRef\":\"main\"}"
 meta_case "non-numeric PR number" "{\"prNumber\":\"1;id\",\"headSha\":\"$good_sha\",\"headRef\":\"a\",\"baseRef\":\"main\"}"
+
+# A well-formed artifact whose headSha differs from the triggering CI run's head commit.
+ws=$(new_workspace)
+: >"$ws/out"
+if run_step "$pr_script" "$ws" "$ws/out" EXPECTED_HEAD_SHA=fedcba9876543210fedcba9876543210fedcba98; then
+  fail "artifact headSha differing from the CI run's head commit accepted"
+else
+  pass "artifact headSha differing from the CI run's head commit refused"
+fi
+
+# Case-insensitive match against the CI run's head commit is accepted.
+ws=$(new_workspace)
+: >"$ws/out"
+if run_step "$pr_script" "$ws" "$ws/out" EXPECTED_HEAD_SHA="${good_sha^^}"; then
+  pass "headSha matching the CI run's head commit (case-insensitive) accepted"
+else
+  fail "matching headSha refused: $(cat "$ws/step.log")"
+fi
 
 ws=$(new_workspace)
 rm -f "$ws/sonar-payload/sonar-pr-meta.json"
