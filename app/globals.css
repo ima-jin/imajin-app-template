@@ -1,3 +1,43 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Page colours. Background and foreground are defined TOGETHER, per colour
+ * scheme, so text can never inherit a background from a different scheme
+ * (#19: dark-theme text rendered on the browser's default white canvas).
+ *
+ * Components use the semantic Tailwind tokens (text-foreground, text-muted,
+ * text-danger, bg-field, border-field-border — see tailwind.config.js), never
+ * hard-coded `text-white` / `text-gray-*` without their own background.
+ * Every pairing meets WCAG AA (>= 4.5:1 text, >= 3:1 UI) — enforced by
+ * src/components/__tests__/ClaimViews.contrast.test.ts.
+ */
+:root {
+  color-scheme: light dark;
+
+  --background: #ffffff;
+  --foreground: #111827; /* 17.7:1 on --background */
+  --muted: #4b5563; /* 7.6:1 */
+  --danger: #b91c1c; /* 6.5:1 */
+  --link: #b45309; /* 5.0:1 */
+  --field-bg: #ffffff;
+  --field-border: #6b7280; /* 4.8:1 */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #030712;
+    --foreground: #f9fafb; /* 19.1:1 on --background */
+    --muted: #9ca3af; /* 8.0:1 */
+    --danger: #fca5a5; /* 11.2:1 */
+    --link: #fbbf24; /* 12.3:1 */
+    --field-bg: #111827;
+    --field-border: #6b7280; /* 4.2:1 on --background */
+  }
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+}

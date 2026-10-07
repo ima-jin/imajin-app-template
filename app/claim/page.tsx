@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { ClaimFormView, ClaimSuccessView, type ClaimFormState, type ClaimResult } from '@/components/ClaimViews';
 import { withBasePath } from '@/lib/base-path';
 
 /**
@@ -16,17 +17,6 @@ import { withBasePath } from '@/lib/base-path';
  * `claimWithCode()`. A browser-only check couldn't run until after the
  * (single-use) code was already spent, so it added no real protection.
  */
-
-interface ClaimResult {
-  appDid: string;
-  publicKey: string | null;
-}
-
-type ClaimFormState =
-  | { status: 'idle' }
-  | { status: 'submitting' }
-  | { status: 'error'; message: string }
-  | { status: 'success'; result: ClaimResult };
 
 interface ClaimResponseBody {
   appDid?: unknown;
@@ -81,60 +71,11 @@ export default function ClaimPage() {
   }
 
   return (
-    <div className="mx-auto max-w-md px-4 py-12">
-      <h1 className="text-2xl font-semibold text-white">Claim this app</h1>
-      <p className="mt-2 text-sm text-gray-400">
-        Paste the one-time claim code from the kernel operator&apos;s <code>/jin</code> approval card to finish
-        provisioning this app&apos;s signing identity.
-      </p>
-      <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
-        <div>
-          <label htmlFor="claimCode" className="block text-sm font-medium text-gray-300">
-            Claim code
-          </label>
-          <input
-            id="claimCode"
-            name="claimCode"
-            type="text"
-            autoComplete="off"
-            required
-            value={claimCode}
-            onChange={(event) => setClaimCode(event.target.value)}
-            className="mt-1 w-full rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-white"
-          />
-        </div>
-        {formState.status === 'error' && <p className="text-sm text-red-400">{formState.message}</p>}
-        <button
-          type="submit"
-          disabled={formState.status === 'submitting'}
-          className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-gray-950 disabled:opacity-50"
-        >
-          {formState.status === 'submitting' ? 'Claiming…' : 'Claim app'}
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function ClaimSuccessView({ result }: Readonly<{ result: ClaimResult }>) {
-  return (
-    <div className="mx-auto max-w-md px-4 py-12">
-      <h1 className="text-2xl font-semibold text-white">App claimed</h1>
-      <p className="mt-2 text-sm text-gray-400">
-        This app&apos;s signing identity is now active. The claim code has been spent and cannot be reused.
-      </p>
-      <dl className="mt-6 space-y-2 text-sm">
-        <div>
-          <dt className="text-gray-500">App DID</dt>
-          <dd className="break-all text-white">{result.appDid}</dd>
-        </div>
-        {result.publicKey !== null && (
-          <div>
-            <dt className="text-gray-500">Public key</dt>
-            <dd className="break-all text-white">{result.publicKey}</dd>
-          </div>
-        )}
-      </dl>
-    </div>
+    <ClaimFormView
+      claimCode={claimCode}
+      formState={formState}
+      onClaimCodeChange={setClaimCode}
+      onSubmit={handleSubmit}
+    />
   );
 }

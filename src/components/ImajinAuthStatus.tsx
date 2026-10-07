@@ -30,7 +30,7 @@ export function ImajinAuthStatus() {
   }, []);
 
   if (session.status === 'loading') {
-    return <div className="h-9 w-28 animate-pulse rounded-lg bg-gray-800/50" />;
+    return <div className="h-9 w-28 animate-pulse rounded-lg bg-field" />;
   }
 
   if (!session.user) {
@@ -48,9 +48,9 @@ function SignInLink() {
   return (
     <a
       href={signInUrl}
-      className="inline-flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:border-amber-500/50 hover:bg-gray-800"
+      className="inline-flex items-center gap-2 rounded-lg border border-field-border bg-field px-4 py-2 text-sm font-medium text-foreground transition-colors hover:underline"
     >
-      Sign in with <strong className="text-amber-400">Imajin</strong>
+      Sign in with <strong className="text-link">Imajin</strong>
     </a>
   );
 }
@@ -58,11 +58,11 @@ function SignInLink() {
 function SignedInStatus({ user }: Readonly<{ user: SessionUser }>) {
   return (
     <div className="flex items-center gap-3">
-      <span className="text-sm text-gray-100">{user.displayName}</span>
+      <span className="text-sm text-foreground">{user.displayName}</span>
       <form action="/api/auth/logout" method="POST">
         <button
           type="submit"
-          className="text-xs text-gray-500 transition-colors hover:text-gray-300"
+          className="text-xs text-muted underline-offset-2 hover:underline"
         >
           Sign out
         </button>
