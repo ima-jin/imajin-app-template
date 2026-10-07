@@ -24,16 +24,22 @@ trap 'rm -rf "$work"' EXIT
 failures=0
 
 fail() {
-  echo "FAIL: $1" >&2
+  local message=$1
+  echo "FAIL: $message" >&2
   failures=$((failures + 1))
+  return 0
 }
 
 pass() {
-  echo "ok:   $1"
+  local message=$1
+  echo "ok:   $message"
+  return 0
 }
 
 step_run() {
-  yq ".jobs.sonarcloud-pr.steps[] | select(.id == \"$1\") | .run" "$workflow"
+  local step_id=$1
+  yq ".jobs.sonarcloud-pr.steps[] | select(.id == \"$step_id\") | .run" "$workflow"
+  return 0
 }
 
 # Executes a job step script the way the runner does. Args: <script> <dir> <output-file>.
@@ -41,10 +47,13 @@ run_step() {
   local script=$1 dir=$2 out=$3
   shift 3
   (cd "$dir" && env GITHUB_OUTPUT="$out" "$@" bash --noprofile --norc -eo pipefail -c "$script") >"$dir/step.log" 2>&1
+  return $?
 }
 
 output_of() {
-  grep -m1 "^$2=" "$1" | cut -d= -f2-
+  local file=$1 name=$2
+  grep -m1 "^${name}=" "$file" | cut -d= -f2-
+  return 0
 }
 
 # Builds a scratch workspace: sonar-payload/ (hostile) + sonar-trusted/ (default branch copy).
@@ -54,6 +63,7 @@ new_workspace() {
   cp -r "$fixtures/hostile-payload" "$dir/sonar-payload"
   cp -r "$fixtures/trusted" "$dir/sonar-trusted"
   echo "$dir"
+  return 0
 }
 
 pr_script=$(step_run pr)
@@ -161,6 +171,7 @@ meta_case() {
   else
     pass "metadata refused: $label"
   fi
+  return 0
 }
 
 good_sha=0123456789abcdef0123456789abcdef01234567
@@ -191,6 +202,7 @@ trusted_case() {
   else
     pass "trusted file refused: $label"
   fi
+  return 0
 }
 
 trusted_case "missing projectKey" "sonar.organization=o\n"
