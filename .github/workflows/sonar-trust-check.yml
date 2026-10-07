@@ -1,0 +1,26 @@
+name: Sonar trust check
+
+# Exercises the privileged `sonarcloud-pr` job's own steps (sonarcloud.yml)
+# against a hostile payload fixture — see scripts/check-sonar-trust.sh and
+# ima-jin/imajin-app-template#15. Unprivileged: no secrets, no network. Runs on
+# the bare scaffold too (needs no package.json).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  sonar-trust-check:
+    name: Sonar trusted-properties check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Run hostile-payload check
+        run: scripts/check-sonar-trust.sh

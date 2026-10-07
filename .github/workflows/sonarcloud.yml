@@ -34,6 +34,18 @@ name: SonarCloud
 # to that workflow's completion and ONLY downloads the artifact — it never
 # runs `actions/checkout` on the PR's ref, and never executes any PR-authored
 # script itself.
+#
+# Trusted scanner configuration (ima-jin/imajin-app-template#15): the artifact
+# is still PR-authored, so the scanner must never trust anything in it that
+# steers where SONAR_TOKEN goes. The privileged job therefore (1) overwrites the
+# payload's sonar-project.properties with the default branch's copy (sparse
+# checkout of that one file — no PR code), (2) passes the server URLs,
+# organization and projectKey as -D args (hardcoded / read from that trusted
+# copy, never from the payload; CLI beats any file), (3) validates the PR head
+# SHA and passes it as sonar.scm.revision, and (4) scans with
+# SonarSource/sonarqube-scan-action pinned by commit SHA. The `run:` blocks of
+# the steps below are executed against a hostile payload fixture by
+# scripts/check-sonar-trust.sh (.github/workflows/sonar-trust-check.yml).
 
 on:
   push:
@@ -162,8 +174,15 @@ jobs:
           number=$(jq -r '.prNumber // empty' "$meta")
           headRef=$(jq -r '.headRef // empty' "$meta")
           baseRef=$(jq -r '.baseRef // empty' "$meta")
+          headSha=$(jq -r '.headSha // empty' "$meta")
           if ! [[ "$number" =~ ^[0-9]+$ ]]; then
             echo "::error::Invalid PR number in metadata."
+            exit 1
+          fi
+          # The payload has no .git, so the scanner can't discover the revision
+          # itself; it is passed as -Dsonar.scm.revision. Exactly 40 hex chars.
+          if ! [[ "$headSha" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Missing or invalid head SHA in PR metadata (expected exactly 40 hex characters)."
             exit 1
           fi
           for ref in "$headRef" "$baseRef"; do
@@ -176,15 +195,79 @@ jobs:
             echo "number=$number"
             echo "headRef=$headRef"
             echo "baseRef=$baseRef"
+            echo "headSha=${headSha,,}"
           } >> "$GITHUB_OUTPUT"
 
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8 # v5.0.0
+      - name: Checkout trusted Sonar properties
+        # Default branch only, and ONLY this one file (sparse checkout) — still
+        # no PR code on disk. Written to its own directory, outside the payload.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: sonar-project.properties
+          sparse-checkout-cone-mode: false
+          path: sonar-trusted
+          persist-credentials: false
+
+      - name: Pin trusted scanner properties
+        id: scan_args
+        # 1. Replace the PR-authored sonar-project.properties with the default
+        #    branch's copy (rm first so a symlink in the artifact can't redirect
+        #    the write).
+        # 2. Build the -D args. organization/projectKey come from the TRUSTED
+        #    file and are allow-listed; the server URLs are literals. Nothing
+        #    from the payload decides where the token is sent or which project
+        #    is written to.
+        # PR values were validated by the `pr` step; they reach this script via
+        # env: only (never interpolated into the script text).
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_HEAD_REF: ${{ steps.pr.outputs.headRef }}
+          PR_BASE_REF: ${{ steps.pr.outputs.baseRef }}
+          PR_HEAD_SHA: ${{ steps.pr.outputs.headSha }}
+        run: |
+          trusted=sonar-trusted/sonar-project.properties
+          payload=sonar-payload/sonar-project.properties
+          if [ ! -s "$trusted" ]; then
+            echo "::error::Trusted $trusted missing or empty on the default branch — refusing to scan."
+            exit 1
+          fi
+          read_prop() {
+            awk -v k="$1" '
+              /^[[:space:]]*[#!]/ { next }
+              {
+                i = index($0, "=")
+                if (i == 0) next
+                key = substr($0, 1, i - 1); gsub(/[[:space:]]/, "", key)
+                if (key == k) { v = substr($0, i + 1); gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); val = v }
+              }
+              END { print val }' "$trusted"
+          }
+          org=$(read_prop sonar.organization)
+          key=$(read_prop sonar.projectKey)
+          for v in "$org" "$key"; do
+            if ! [[ "$v" =~ ^[A-Za-z0-9._:-]+$ ]]; then
+              echo "::error::sonar.organization/sonar.projectKey missing or unsafe in the trusted $trusted."
+              exit 1
+            fi
+          done
+          rm -f "$payload"
+          cp "$trusted" "$payload"
+          host=https://sonarcloud.io
+          args="-Dsonar.host.url=$host -Dsonar.scanner.sonarcloudUrl=$host"
+          args="$args -Dsonar.organization=$org -Dsonar.projectKey=$key"
+          args="$args -Dsonar.pullrequest.key=$PR_NUMBER -Dsonar.pullrequest.branch=$PR_HEAD_REF"
+          args="$args -Dsonar.pullrequest.base=$PR_BASE_REF -Dsonar.scm.revision=$PR_HEAD_SHA"
+          echo "Effective Sonar scanner args: $args"
+          echo "args=$args" >> "$GITHUB_OUTPUT"
+
+      - name: SonarCloud Scan
+        # No GITHUB_TOKEN on purpose: PR decoration is done server-side by the
+        # SonarCloud GitHub App, and every PR parameter is passed explicitly in
+        # `args` (the payload has no .git to discover them from). The scanner
+        # therefore sees SONAR_TOKEN only, and the token only goes to the
+        # hardcoded sonarcloud.io URLs in `args`.
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
         with:
           projectBaseDir: sonar-payload
-          args: >
-            -Dsonar.pullrequest.key=${{ steps.pr.outputs.number }}
-            -Dsonar.pullrequest.branch=${{ steps.pr.outputs.headRef }}
-            -Dsonar.pullrequest.base=${{ steps.pr.outputs.baseRef }}
+          args: ${{ steps.scan_args.outputs.args }}
