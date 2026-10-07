@@ -40,10 +40,34 @@ export function ImajinAuthStatus() {
   return <SignedInStatus user={session.user} />;
 }
 
+/**
+ * The kernel's authorize URL, or `null` when `authUrl` or `appId` is empty — an
+ * empty `authUrl` would otherwise produce a relative `/auth/authorize?...` link
+ * that 404s on this app. (Boot-time env guards in instrumentation.ts make that
+ * unreachable in a configured deployment; this keeps the component safe on its own.)
+ */
+export function buildSignInUrl(authUrl: string, appId: string): string | null {
+  let base = authUrl.trim();
+  while (base.endsWith('/')) {
+    base = base.slice(0, -1);
+  }
+  const id = appId.trim();
+  if (base === '' || id === '') {
+    return null;
+  }
+  return `${base}/auth/authorize?app_id=${encodeURIComponent(id)}&scopes=profile:read`;
+}
+
 function SignInLink() {
-  const authUrl = process.env.NEXT_PUBLIC_IMAJIN_AUTH_URL ?? '';
-  const appId = process.env.NEXT_PUBLIC_IMAJIN_APP_ID ?? '';
-  const signInUrl = `${authUrl}/auth/authorize?app_id=${appId}&scopes=profile:read`;
+  // Literal `process.env.NEXT_PUBLIC_*` reads so Next.js can inline them at build time.
+  const signInUrl = buildSignInUrl(
+    process.env.NEXT_PUBLIC_IMAJIN_AUTH_URL ?? '',
+    process.env.NEXT_PUBLIC_IMAJIN_APP_ID ?? ''
+  );
+
+  if (signInUrl === null) {
+    return null;
+  }
 
   return (
     <a
