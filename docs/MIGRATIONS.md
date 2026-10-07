@@ -35,6 +35,22 @@ pnpm db:studio      # browse this app's own schema
 (`schemaFilter`), so `pnpm db:generate` can never emit a migration for a table outside this
 app's own schema.
 
+## Enforced in CI
+
+`.github/workflows/check-migrations.yml` runs `scripts/check-migrations.mjs` on every PR and push to `main`:
+
+- every object `migrations/*.sql` creates or alters lives in **one** schema — never `public`, never a kernel-owned
+  schema (`registry`, `auth`, `profile`), never a second app schema;
+- `migrations/` is contiguous (`0000_…`, `0001_…`), non-empty, and matches drizzle's `meta/_journal.json` — a
+  hand-added or hand-edited migration fails;
+- `src/db` declares tables only through the env-derived app schema (`pgSchema(process.env.APP_DB_SCHEMA)`), and
+  `drizzle.config.ts` keeps its `schemaFilter`;
+- `drizzle-kit generate` against the committed schema is a no-op — if you changed `src/db/schema.ts`, you must
+  commit the migration `pnpm db:generate` produced.
+
+Run the static half locally with `node scripts/check-migrations.mjs`. An app that owns no database (no
+`drizzle.config.ts`) is not subject to the check.
+
 ## What this app does not do
 
 - It does not squash, rewrite, or otherwise manage the kernel's own migration history — that is

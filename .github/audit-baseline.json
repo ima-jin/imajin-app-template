@@ -1,0 +1,4 @@
+{
+  "note": "Debt ledger, NOT an allowlist. High/critical advisories listed here are tolerated by scripts/audit-gate.mjs; anything NOT listed fails the Security Audit workflow. This file only ever shrinks: remove entries as they are fixed (node scripts/audit-gate.mjs <report> --prune drops resolved ones). Do not add an entry to make CI pass without a stated reason. Each entry: { \"id\": \"GHSA-...\", \"module\": \"...\", \"severity\": \"high\", \"reason\": \"...\" }.",
+  "advisories": []
+}
