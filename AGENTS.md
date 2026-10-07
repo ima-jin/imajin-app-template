@@ -31,6 +31,7 @@ file before touching code — it defines the boundary you must not cross and the
 4. `pnpm db:migrate` — this app's own Postgres schema only, see
    [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md).
 5. `pnpm dev`.
+6. To deploy dev or prod: [`docs/DEPLOY.md`](./docs/DEPLOY.md) (pm2 entry + Caddy route convention).
 
 ---
 
@@ -71,8 +72,9 @@ This app talks to Imajin as an **external client**. Hard rules, enforced in revi
   same versioned artifact the same way. Depending on one is not a boundary violation.
 - ❌ **No `workspace:*` dependencies.** A `workspace:*` version range only resolves inside the monorepo. If you see
   one, this app has drifted back into being a monorepo package instead of an external client.
-- ❌ **No monorepo internals.** No importing `apps/kernel/src/**`, no `@imajin/db`, no direct Postgres access to
-  kernel schemas. The kernel is consumed only via its `/spec`'d HTTP/WS routes and the published SDK — never by
+- ❌ **No monorepo internals.** No importing the kernel's source files, no `@imajin/*` packages (that scope is the
+  monorepo's unpublished internals — the published SDK is `@ima-jin/*`), no direct Postgres access to kernel
+  schemas. The kernel is consumed only via its `/spec`'d HTTP/WS routes and the published SDK — never by
   reaching around them into the kernel's own source or database.
 - ❌ **No in-process bus.** The bus is kernel-internal. Emit `supply.*`/domain events by calling the kernel's
   app-auth-gated domain API, never by importing a publisher.
@@ -171,6 +173,42 @@ An app cloned from the template shares its history, so every run is a normal mer
 template" must be joined **once** first (`git merge -s ours --allow-unrelated-histories <generating-template-sha>`,
 history-only); the script detects that and prints the steps. On the rare conflict (almost always §8), **keep your
 §8** and take the template's §1–§7. See the script header for details.
+
+---
+
+## 6. CI gates — the bar every PR must clear
+
+A fork inherits the same gates the platform's own apps run. Run them locally before you push; **do not weaken one
+to get green** (no `continue-on-error`, no swallowing a gate's exit code, no baseline entry without a stated
+reason — fix the cause, or say in the PR why it can't be fixed).
+
+| Gate (workflow) | What it enforces | Run it locally |
+|-----------------|------------------|----------------|
+| **CI → Test + build** (`ci.yml`) | lint, typecheck, test, build — installed with `--frozen-lockfile --ignore-scripts` | `pnpm lint && pnpm typecheck && pnpm test && pnpm build` |
+| **CI → Clean registry install** (`ci.yml`) | every dependency, incl. `@ima-jin/*`, resolves from the npm registry: no `workspace:`/`link:`/`file:` specifiers, no `@imajin/*`, no `.npmrc` redirect | `node scripts/check-registry-deps.mjs` |
+| **CI → Markdown control-char check** (`ci.yml`) | no BEL / form-feed / lone CR in `*.md` (a mangled inline `gh --body`) — use `--body-file` | (CI only) |
+| **Security Audit** (`security-audit.yml`) | no NEW high/critical advisory in production dependencies, measured against `.github/audit-baseline.json` (a debt ledger that only shrinks). A weekly run files one rolling issue for advisories published later | `pnpm audit --prod --audit-level high --json > audit-report.json; node scripts/audit-gate.mjs audit-report.json` |
+| **Check Migrations** (`check-migrations.yml`) | this app only touches its OWN schema (one schema, never `public`/kernel-owned); `migrations/` is contiguous and matches drizzle's journal; `schema.ts` and `migrations/` never drift | `node scripts/check-migrations.mjs`, then `pnpm db:generate` must report "nothing to migrate" |
+| **SonarCloud** (`sonarcloud.yml`) | the quality gate: zero new issues; coverage and duplication thresholds on new code. PR scans run from `main`'s copy of the workflow, after CI succeeds | `pnpm test:coverage` (writes `coverage/lcov.info`) |
+| **CodeQL** (GitHub default setup) | code-scanning alerts on every PR; no workflow file — configured repo-side | — |
+
+Rules that apply to anything you touch under `.github/` or `scripts/`:
+
+- **Pin every third-party action by full commit SHA** with a `# vX.Y.Z` comment — never a tag or branch. Resolve the
+  SHA from the release tag; keep the existing pins.
+- **`--ignore-scripts` on every CI install.** If a dependency genuinely needs a lifecycle script, run exactly that
+  script as an explicit step and say which one and why in a comment — don't drop the flag.
+- **Never interpolate untrusted input with `${{ }}` inside `run:`** (branch names, PR titles, issue bodies, ...). Pass
+  it through `env:` and quote it in the script.
+- **No secrets in workflows or the repo.** `SONAR_TOKEN` and friends live in repo/org secrets only.
+- **Keep the scaffold-only guards.** CI must stay green on a tree with no `package.json` (the `detect` steps) and for
+  an app that owns no database (no `drizzle.config.ts`).
+- **Logic goes in `scripts/lib/` with unit tests;** `scripts/*.mjs` stay thin CLI wrappers.
+- **Never hand-edit `migrations/`** — generate with `pnpm db:generate` and commit the result.
+- **Commit the lockfile** whenever you touch `package.json` dependencies or `pnpm.overrides`.
+
+A gate you cannot satisfy because it needs a repo or org admin (a missing `SONAR_TOKEN`, the SonarCloud project,
+code scanning, branch protection) is reported in the PR — not worked around.
 
 ---
 

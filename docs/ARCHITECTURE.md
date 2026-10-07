@@ -20,11 +20,11 @@ kernel's app-auth-gated domain API.
 
 ## Deploy convention
 
-Each fork deploys as its own pm2 ecosystem entry behind a Caddy route (`Host` header → this app's port), the same
-shape as every other app on the platform. Neither pm2 config nor the Caddy route is copied from the monorepo — the
-monorepo's `deploy-dev.yml`/`deploy-prod.yml` assume shared infra (self-hosted runners, its own secrets) that doesn't
-transfer to a standalone fork. Wire your own deploy workflow against your fork's runner/secrets when you're ready to
-ship; this convention only fixes the shape (one pm2 entry, one Caddy route) so it stays consistent across apps.
+Each fork deploys as its own pm2 ecosystem entry behind a Caddy route (path prefix → this app's port), the same
+shape as every other app on the platform. The full convention — deploy sequence, `ecosystem.config.cjs`, Caddy
+snippet, rollback — is in [`DEPLOY.md`](./DEPLOY.md). No deploy workflow ships with the template: a deploy needs the
+host's runner and secrets, so wire your own against your fork's infra when you're ready to ship; the convention only
+fixes the shape (one pm2 entry, one Caddy route per environment) so it stays consistent across apps.
 
 ## The loop this app instruments
 
