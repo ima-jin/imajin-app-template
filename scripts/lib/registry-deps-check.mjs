@@ -9,11 +9,10 @@
 const DEP_FIELDS = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
 // Specifier prefixes that do not come from the registry.
 const NON_REGISTRY_SPEC = /^(?:workspace:|link:|file:|portal:|git\+|git:|github:|https?:|\.{1,2}\/|\/)/;
-// Lockfile lines that mean a non-registry resolution.
-const LOCKFILE_NON_REGISTRY = [
-  /^\s+(?:version|specifier):\s+(?:workspace|link|file|portal):/m,
-  /resolution:\s*\{[^}]*(?:tarball|directory|type:\s*git|repo:)/,
-];
+// Prefixes of a lockfile `specifier:`/`version:` value that do not come from the registry.
+const LOCKFILE_SPEC_PREFIXES = ['workspace:', 'link:', 'file:', 'portal:'];
+// Keys inside a lockfile `resolution: {…}` flow map that mean a non-registry resolution.
+const LOCKFILE_RESOLUTION_KEYS = ['tarball:', 'directory:', 'type: git', 'repo:'];
 const OFFICIAL_REGISTRY = 'https://registry.npmjs.org/';
 
 /** Errors for package.json: non-registry specifiers and the unpublished monorepo scope. */
@@ -36,11 +35,31 @@ export function checkPackageJson(pkg) {
   return errors;
 }
 
-/** Errors for pnpm-lock.yaml text. */
+function lockfileValue(trimmed, key) {
+  if (!trimmed.startsWith(key)) return null;
+  return trimmed.slice(key.length).trim().replace(/^['"]/, '');
+}
+
+function isNonRegistrySpecLine(trimmed) {
+  const value = lockfileValue(trimmed, 'specifier:') ?? lockfileValue(trimmed, 'version:');
+  return value !== null && LOCKFILE_SPEC_PREFIXES.some((prefix) => value.startsWith(prefix));
+}
+
+function isNonRegistryResolutionLine(trimmed) {
+  return trimmed.includes('resolution:') && LOCKFILE_RESOLUTION_KEYS.some((key) => trimmed.includes(key));
+}
+
+/** Errors for pnpm-lock.yaml text (line-based: no backtracking regexes over untrusted-size input). */
 export function checkLockfile(text) {
-  return LOCKFILE_NON_REGISTRY.filter((pattern) => pattern.test(text)).map(
-    (pattern) => `pnpm-lock.yaml contains a non-registry resolution (matched ${pattern})`,
-  );
+  const errors = [];
+  const lines = text.split('\n').map((line) => line.trim());
+  if (lines.some(isNonRegistrySpecLine)) {
+    errors.push('pnpm-lock.yaml contains a workspace/link/file/portal specifier');
+  }
+  if (lines.some(isNonRegistryResolutionLine)) {
+    errors.push('pnpm-lock.yaml contains a tarball/git/directory resolution (not the npm registry)');
+  }
+  return errors;
 }
 
 /** Errors for an .npmrc (pass null when the file does not exist). */

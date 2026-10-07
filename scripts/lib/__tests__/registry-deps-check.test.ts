@@ -45,6 +45,7 @@ describe('checkLockfile', () => {
     expect(checkLockfile('    resolution: {tarball: https://example.com/x.tgz}')).toHaveLength(1);
     expect(checkLockfile('    resolution: {type: git, repo: https://example.com/x.git, commit: abc}')).toHaveLength(1);
     expect(checkLockfile('    resolution: {directory: ../x, type: directory}')).toHaveLength(1);
+    expect(checkLockfile("        specifier: 'link:../quoted'")).toHaveLength(1);
   });
 });
 
