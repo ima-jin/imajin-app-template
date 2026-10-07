@@ -23,7 +23,7 @@ jobs:
     name: Markdown control-char check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Fail on control characters in tracked markdown
         run: |
           # BEL (0x07) and form-feed (0x0C) never belong in prose; a lone CR
@@ -41,7 +41,7 @@ jobs:
     name: Test + build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Detect app
         id: detect
@@ -67,65 +67,83 @@ jobs:
 
       - name: Setup pnpm
         if: steps.detect.outputs.has_app == 'true' && steps.pm.outputs.pm == 'pnpm'
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node
         if: steps.detect.outputs.has_app == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: ${{ steps.pm.outputs.pm }}
 
       - name: Install
         if: steps.detect.outputs.has_app == 'true'
+        # --ignore-scripts: no dependency lifecycle script runs in CI. None is
+        # required to lint, typecheck, test or build this app (verified: the
+        # full suite passes with scripts disabled). A fork that adds a package
+        # which genuinely needs one (a native addon's postinstall, say) should
+        # run exactly that script explicitly after install and say why here —
+        # not drop the flag.
+        env:
+          PM: ${{ steps.pm.outputs.pm }}
         run: |
-          case "${{ steps.pm.outputs.pm }}" in
-            pnpm) pnpm install --frozen-lockfile ;;
-            yarn) yarn install --frozen-lockfile ;;
-            npm)  npm ci ;;
+          case "$PM" in
+            pnpm) pnpm install --frozen-lockfile --ignore-scripts ;;
+            yarn) yarn install --frozen-lockfile --ignore-scripts ;;
+            npm)  npm ci --ignore-scripts ;;
           esac
 
       - name: Test
         if: steps.detect.outputs.has_app == 'true'
+        env:
+          PM: ${{ steps.pm.outputs.pm }}
         run: |
           if node -e "process.exit(require('./package.json').scripts?.test ? 0 : 1)"; then
-            ${{ steps.pm.outputs.pm }} run test
+            "$PM" run test
           else
             echo "No test script — skipping."
           fi
 
       - name: Build
         if: steps.detect.outputs.has_app == 'true'
+        env:
+          PM: ${{ steps.pm.outputs.pm }}
         run: |
           if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
-            ${{ steps.pm.outputs.pm }} run build
+            "$PM" run build
           else
             echo "No build script — skipping."
           fi
 
       - name: Lint (optional)
         if: steps.detect.outputs.has_app == 'true'
+        env:
+          PM: ${{ steps.pm.outputs.pm }}
         run: |
           if node -e "process.exit(require('./package.json').scripts?.lint ? 0 : 1)"; then
-            ${{ steps.pm.outputs.pm }} run lint
+            "$PM" run lint
           else
             echo "No lint script — skipping."
           fi
 
       - name: Typecheck (optional)
         if: steps.detect.outputs.has_app == 'true'
+        env:
+          PM: ${{ steps.pm.outputs.pm }}
         run: |
           if node -e "process.exit(require('./package.json').scripts?.typecheck ? 0 : 1)"; then
-            ${{ steps.pm.outputs.pm }} run typecheck
+            "$PM" run typecheck
           else
             echo "No typecheck script — skipping."
           fi
 
       - name: Generate coverage (for the SonarCloud workflow)
         if: steps.detect.outputs.has_app == 'true' && github.event_name == 'pull_request'
+        env:
+          PM: ${{ steps.pm.outputs.pm }}
         run: |
           if node -e "process.exit(require('./package.json').scripts?.['test:coverage'] ? 0 : 1)"; then
-            ${{ steps.pm.outputs.pm }} run test:coverage
+            "$PM" run test:coverage
           else
             echo "No test:coverage script — skipping (Sonar reports 0% new-code coverage)."
           fi
@@ -166,9 +184,74 @@ jobs:
 
       - name: Upload Sonar payload
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sonar-payload
           path: /tmp/sonar-payload
           retention-days: 1
           if-no-files-found: error
+
+  registry-install:
+    # Proof that this app consumes @ima-jin/* (and everything else) from the
+    # public npm registry, like any outside party (ima-jin/imajin-ai#1982):
+    # a from-scratch install — no dependency cache, no auth token, no
+    # .npmrc redirect — must succeed, and every @ima-jin/* package must then
+    # resolve into pnpm's store rather than a workspace link. The static half
+    # (scripts/check-registry-deps.mjs) also rejects workspace:/link:/file:
+    # specifiers and the monorepo-internal @imajin/* scope.
+    name: Clean registry install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Detect app
+        id: detect
+        run: |
+          if [ -f package.json ]; then
+            echo "has_app=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_app=false" >> "$GITHUB_OUTPUT"
+            echo "No package.json (scaffold-only template) — skipping registry install proof."
+          fi
+
+      - name: Detect package manager
+        id: pm
+        if: steps.detect.outputs.has_app == 'true'
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            echo "pm=pnpm" >> "$GITHUB_OUTPUT"
+          elif [ -f yarn.lock ]; then
+            echo "pm=yarn" >> "$GITHUB_OUTPUT"
+          else
+            echo "pm=npm" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm
+        if: steps.detect.outputs.has_app == 'true' && steps.pm.outputs.pm == 'pnpm'
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node (deliberately no dependency cache)
+        if: steps.detect.outputs.has_app == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Static check — registry specifiers only
+        if: steps.detect.outputs.has_app == 'true'
+        run: node scripts/check-registry-deps.mjs
+
+      - name: Clean install from the public registry
+        if: steps.detect.outputs.has_app == 'true'
+        env:
+          PM: ${{ steps.pm.outputs.pm }}
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+        run: |
+          case "$PM" in
+            pnpm) pnpm install --frozen-lockfile --ignore-scripts ;;
+            yarn) yarn install --frozen-lockfile --ignore-scripts ;;
+            npm)  npm ci --ignore-scripts ;;
+          esac
+
+      - name: Installed check — @ima-jin/* resolved from the registry store
+        if: steps.detect.outputs.has_app == 'true'
+        run: node scripts/check-registry-deps.mjs --installed

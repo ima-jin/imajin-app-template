@@ -1,0 +1,92 @@
+name: Check Migrations
+
+# Migrations gate for an app that owns its own Postgres schema + migrations/
+# folder (docs/MIGRATIONS.md; ima-jin/imajin-ai#1991, #2524 — per-owner
+# migrations). Adapted from the monorepo's check-migrations.yml, which guards
+# many owners sharing one folder; a standalone app has ONE owner, so this
+# enforces the other half of the rule instead: the app only ever touches its
+# own schema, and schema.ts and migrations/ never drift apart.
+#
+#   1. scripts/check-migrations.mjs (static, needs only node):
+#        - migrations/*.sql are NNNN_name.sql, contiguous, non-empty and match
+#          drizzle-kit's _journal.json (no hand-added/hand-edited migrations)
+#        - every object they touch lives in ONE schema — never public, never a
+#          kernel-owned schema, never a second app schema
+#        - src/db declares tables only via the env-derived app schema
+#        - drizzle.config.ts still scopes drizzle-kit with `schemaFilter`
+#        - no stray .sql files outside migrations/
+#   2. Drift: `drizzle-kit generate` against the committed schema must be a
+#      no-op. If it would emit a new migration, schema.ts changed without one.
+#
+# Scaffold-only / no-database path: no package.json or no drizzle.config.ts ->
+# nothing to check, the job passes (an app that owns no database, e.g. a pure
+# kernel client, is simply not subject to this gate).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  migrations:
+    name: Schema ownership + migration sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Detect app-owned schema
+        id: detect
+        run: |
+          if [ -f package.json ] && [ -f drizzle.config.ts ]; then
+            echo "has_db=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_db=false" >> "$GITHUB_OUTPUT"
+            echo "No package.json + drizzle.config.ts (scaffold-only, or an app that owns no database) — nothing to check."
+          fi
+          if [ -f pnpm-lock.yaml ]; then
+            echo "has_pnpm=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_pnpm=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm
+        if: steps.detect.outputs.has_db == 'true' && steps.detect.outputs.has_pnpm == 'true'
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node
+        if: steps.detect.outputs.has_db == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Schema ownership + migrations folder consistency
+        if: steps.detect.outputs.has_db == 'true'
+        run: node scripts/check-migrations.mjs
+
+      - name: Install (needed only to run drizzle-kit)
+        if: steps.detect.outputs.has_db == 'true' && steps.detect.outputs.has_pnpm == 'true'
+        # --ignore-scripts: drizzle-kit's generate needs no lifecycle script.
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Schema/migration sync (drizzle-kit generate must be a no-op)
+        if: steps.detect.outputs.has_db == 'true' && steps.detect.outputs.has_pnpm == 'true'
+        run: |
+          # drizzle.config.ts requires APP_DB_SCHEMA; the schema the committed
+          # migrations own is, by the check above, the only one it can be.
+          schema=$(node scripts/check-migrations.mjs --print-schema)
+          if [ -z "$schema" ]; then
+            echo "::warning::No migrations yet — cannot derive APP_DB_SCHEMA, skipping the drift check."
+            exit 0
+          fi
+          APP_DB_SCHEMA="$schema" pnpm exec drizzle-kit generate
+          if [ -n "$(git status --porcelain -- migrations)" ]; then
+            echo "::error::src/db/schema.ts changed without a migration. Run 'pnpm db:generate' and commit migrations/."
+            git status --porcelain -- migrations
+            git diff -- migrations
+            exit 1
+          fi
+          echo "schema.ts and migrations/ are in sync."

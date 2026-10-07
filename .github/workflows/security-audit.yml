@@ -1,0 +1,166 @@
+name: Security Audit
+
+# Dependency-advisory gate, ported from ima-jin/imajin-ai (ci.yml `audit` job +
+# its scheduled security-audit.yml) and adapted to a single app. Two jobs:
+#
+#   audit            PR / push gate. Fails only on high/critical advisories in
+#                    PRODUCTION dependencies that are NOT in
+#                    .github/audit-baseline.json (see scripts/audit-gate.mjs).
+#                    A bare `pnpm audit` would red-light unrelated PRs whenever
+#                    an advisory is published against code nobody touched —
+#                    the ratchet keeps the gate honest without making it
+#                    un-mergeable.
+#   scheduled-audit  Weekly full report that opens/updates ONE rolling issue,
+#                    so a new advisory surfaces without holding any PR hostage.
+#
+# Neither job runs `pnpm install`: `pnpm audit` resolves from the lockfile
+# alone, so installing would only add runtime and run dependency lifecycle
+# scripts (in the scheduled job, with an `issues: write` token). Not a risk
+# worth taking for something not needed. Hence also no `cache:` on setup-node —
+# a cache with no install has no store to save, and the post-job save step
+# fails the run ("Path Validation Error").
+#
+# Scaffold-only path: with no package.json / pnpm-lock.yaml there is nothing to
+# audit, the jobs skip their steps and pass. (pnpm-only, like the template; an
+# npm/yarn fork should swap the audit command and gate input accordingly.)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Mondays 06:00 UTC — early enough to be triaged during the week.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Dependency audit
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Detect lockfile
+        id: detect
+        run: |
+          if [ -f package.json ] && [ -f pnpm-lock.yaml ]; then
+            echo "has_lock=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_lock=false" >> "$GITHUB_OUTPUT"
+            echo "No package.json + pnpm-lock.yaml (scaffold-only template) — nothing to audit."
+          fi
+
+      - name: Setup pnpm
+        if: steps.detect.outputs.has_lock == 'true'
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node
+        if: steps.detect.outputs.has_lock == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Audit gate (new high/critical advisories fail)
+        if: steps.detect.outputs.has_lock == 'true'
+        # `pnpm audit` exits non-zero whenever it reports anything at all, so
+        # its exit code cannot be the gate; the report is. An unreadable or
+        # empty report (registry unreachable, endpoint change) exits 2 inside
+        # audit-gate.mjs, so a broken pipeline can never pass silently.
+        run: |
+          pnpm audit --prod --audit-level high --json > audit-report.json || true
+          node scripts/audit-gate.mjs audit-report.json
+
+  scheduled-audit:
+    name: Scheduled audit report
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Detect lockfile
+        id: detect
+        run: |
+          if [ -f package.json ] && [ -f pnpm-lock.yaml ]; then
+            echo "has_lock=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_lock=false" >> "$GITHUB_OUTPUT"
+            echo "No package.json + pnpm-lock.yaml (scaffold-only template) — nothing to audit."
+          fi
+
+      - name: Setup pnpm
+        if: steps.detect.outputs.has_lock == 'true'
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node
+        if: steps.detect.outputs.has_lock == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+
+      # --report never exits non-zero: this job reports, it does not gate. A red
+      # scheduled run would be indistinguishable from a broken workflow.
+      - name: Run audit
+        id: audit
+        if: steps.detect.outputs.has_lock == 'true'
+        run: |
+          pnpm audit --prod --audit-level high --json > audit-report.json || true
+          node scripts/audit-gate.mjs audit-report.json --report > audit-report.txt
+          echo "--- report ---"
+          cat audit-report.txt
+          if grep -q "NEW high/critical advisories" audit-report.txt; then
+            echo "has_new=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_new=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # One rolling issue rather than a new one every Monday: a weekly firehose
+      # gets muted, and a muted alert is worse than none. Identified by exact
+      # title (not --search: the title contains search-syntax metacharacters).
+      - name: Open or update the audit issue
+        if: steps.audit.outputs.has_new == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE="chore(security): new high/critical dependency advisories"
+          BODY_FILE=$(mktemp)
+          {
+            echo "Advisories found that are **not** in \`.github/audit-baseline.json\`."
+            echo
+            echo "Detected by the scheduled audit on $(date -u +%Y-%m-%d)."
+            echo
+            echo '```'
+            cat audit-report.txt
+            echo '```'
+            echo
+            echo "Resolve by upgrading or adding a pnpm override. If an advisory genuinely"
+            echo "cannot be fixed, add it to the baseline **with a reason** — a reviewable"
+            echo "decision. Note the PR gate fails on these until they are fixed or baselined."
+            echo
+            echo "_Filed automatically by \`.github/workflows/security-audit.yml\`._"
+          } > "$BODY_FILE"
+
+          # `gh issue create` hard-fails on an unknown label, and the label
+          # taxonomy is consumed (scripts/init-taxonomy.sh), not extended here —
+          # so only apply `tech-debt` if this repo has been seeded with it.
+          LABEL_ARGS=()
+          if gh label list --limit 200 --json name --jq '.[].name' | grep -qx 'tech-debt'; then
+            LABEL_ARGS=(--label tech-debt)
+          fi
+
+          EXISTING=$(gh issue list --state open --limit 200 --json number,title \
+            | jq -r --arg title "$TITLE" '[.[] | select(.title == $title) | .number] | first // empty')
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body-file "$BODY_FILE"
+            echo "commented on existing issue #$EXISTING"
+          else
+            gh issue create --title "$TITLE" --body-file "$BODY_FILE" "${LABEL_ARGS[@]}"
+            echo "opened a new audit issue"
+          fi
