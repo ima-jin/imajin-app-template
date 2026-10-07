@@ -34,7 +34,9 @@ The kernel verifies both and returns `{ appDid, userDid, scopes }` — that trip
    You'll get back this app's `appDid` and registry `id`.
 3. **Set env**: `cp .env.example .env.local`, then fill in `IMAJIN_APP_DID`,
    `NEXT_PUBLIC_IMAJIN_APP_ID`, `SESSION_SECRET`, `APP_DB_SCHEMA`, `DATABASE_URL`, and
-   `IMAJIN_KERNEL_URL`. This app refuses to start without `IMAJIN_APP_DID` set, or if a raw
+   `IMAJIN_KERNEL_URL`, plus `IMAJIN_AUTH_URL` / `NEXT_PUBLIC_IMAJIN_AUTH_URL` (the kernel base URL — shipped
+   empty on purpose). This app refuses to start without `IMAJIN_APP_DID`, `IMAJIN_AUTH_URL`,
+   `SESSION_SECRET` and `NEXT_PUBLIC_IMAJIN_APP_ID` set, or if a raw
    `IMAJIN_APP_PRIVATE_KEY` is present (see `instrumentation.ts`) — it fetches its own signing key
    at boot via `@ima-jin/auth-client`'s `loadAppSigningKey()` instead. **Skip `IMAJIN_APP_CLAIM_CODE`
    for now**: the operator path is *approve on `/jin` → open `<this app>/claim` → paste the code →
