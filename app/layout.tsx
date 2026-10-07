@@ -14,8 +14,8 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     <html lang="en">
       <body>
         <Providers>
-          <header className="flex items-center justify-between border-b border-gray-800/50 bg-gray-950/90 px-4 py-2 backdrop-blur">
-            <span className="text-sm font-semibold text-white">Imajin App Template</span>
+          <header className="flex items-center justify-between border-b border-field-border bg-background px-4 py-2">
+            <span className="text-sm font-semibold text-foreground">Imajin App Template</span>
             <ImajinAuthStatus />
           </header>
           <main>{children}</main>
