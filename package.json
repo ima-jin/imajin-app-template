@@ -16,6 +16,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@ima-jin/auth": "^0.8.15",
     "@ima-jin/auth-client": "^0.8.8",
     "drizzle-orm": "^0.45.1",
     "next": "^15.5.24",
