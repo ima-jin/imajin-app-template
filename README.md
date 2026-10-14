@@ -183,6 +183,7 @@ prefix instead of at `/`. `next.config.js` reads it for Next's own `basePath` (c
 0.8.18 before parsing or calling `src/lib/kernel-notification.ts`. There is no shared callback
 credential or Bearer fallback. The expected audience is this deployment's `IMAJIN_APP_DID`,
 not the scoped-token slug or a request-supplied value. Public discovery uses `AUTH_SERVICE_URL`.
+Ship the receiver only after the kernel signs on that same environment — see [Deploy order](./docs/DEPLOY.md#deploy-order).
 
 In your fork, replace `handleKernelNotification`'s no-op with your own domain handler. Its input
 is `unknown`: validate the JSON shape before effects, then implement business idempotency for

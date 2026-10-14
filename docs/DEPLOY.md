@@ -150,6 +150,14 @@ Verify: `curl -fsS https://jin.imajin.ai/<app>/api/health` returns `{"status":"o
 
 ## Kernel-signed notifications
 
+### Deploy order
+
+Deploy a kernel that signs callbacks before upgrading this receiver. Ship the app with the
+verified receiver to an environment **only after the kernel on that same environment is signing
+kernel→app webhooks** ([ima-jin/imajin-ai#2800](https://github.com/ima-jin/imajin-ai/pull/2800),
+[ima-jin/imajin-ai#2798](https://github.com/ima-jin/imajin-ai/issues/2798)).
+Deploy the kernel first, then the app: an unsigned kernel makes every callback fail with 401.
+
 The kernel signs; the app verifies. `/api/webhooks/kernel` uses the public SDK 0.8.18 and
 requires no shared callback credential. Set the non-secret `IMAJIN_APP_DID` to this environment's
 registered app DID and `AUTH_SERVICE_URL` to its kernel auth URL including `/auth`. A claimed
