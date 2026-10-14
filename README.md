@@ -33,7 +33,7 @@ The kernel verifies both and returns `{ appDid, userDid, scopes }` — that trip
 2. **Register this app with the kernel** — see [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
    You'll get back this app's `appDid` and registry `id`.
 3. **Set env**: `cp .env.example .env.local`, then fill in `IMAJIN_APP_DID`,
-   `NEXT_PUBLIC_IMAJIN_APP_ID`, `SESSION_SECRET`, `APP_DB_SCHEMA`, `DATABASE_URL`, and
+   `NEXT_PUBLIC_IMAJIN_APP_ID`, `APP_DB_SCHEMA`, `DATABASE_URL`, and
    `IMAJIN_KERNEL_URL`, plus `IMAJIN_AUTH_URL` / `NEXT_PUBLIC_IMAJIN_AUTH_URL` (the kernel base URL — shipped
    empty on purpose). This app refuses to start without `IMAJIN_APP_DID`, `IMAJIN_AUTH_URL`,
    `SESSION_SECRET` and `NEXT_PUBLIC_IMAJIN_APP_ID` set, or if a raw
@@ -41,6 +41,10 @@ The kernel verifies both and returns `{ appDid, userDid, scopes }` — that trip
    at boot via `@ima-jin/auth-client`'s `loadAppSigningKey()` instead. Claim only in the browser:
    *approve on `/jin` → open `<this app>/claim` → paste the code →
    done* — see [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
+   Provision/seal the session credential through approved kernel/vault tooling; never make or copy
+   a secret in a shell or env file. Vault-backed session loading is separate work (#24); if the
+   approved tool path is unavailable, stop rather than inventing a credential. For kernel
+   notifications set the non-secret `AUTH_SERVICE_URL` (kernel auth URL including `/auth`).
 4. **Migrate this app's own database** (its own Postgres schema only — see
    [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md)):
    ```bash
@@ -172,10 +176,23 @@ prefix instead of at `/`. `next.config.js` reads it for Next's own `basePath` (c
 `router.push` automatically); route any raw `fetch()`, `<a href>`, or `redirect()` through
 `src/lib/base-path.ts`'s `withBasePath()` helper, since Next.js doesn't rewrite those.
 
+## Kernel notifications: the kernel signs, the app verifies
+
+`POST /api/webhooks/kernel` is the one minimal example receiver. It uses
+`verifyKernelWebhook` from the public, exactly pinned `@ima-jin/auth/kernel-webhook` SDK
+0.8.18 before parsing or calling `src/lib/kernel-notification.ts`. There is no shared callback
+credential or Bearer fallback. The expected audience is this deployment's `IMAJIN_APP_DID`,
+not the scoped-token slug or a request-supplied value. Public discovery uses `AUTH_SERVICE_URL`.
+
+In your fork, replace `handleKernelNotification`'s no-op with your own domain handler. Its input
+is `unknown`: validate the JSON shape before effects, then implement business idempotency for
+freshly signed retries. The template acknowledges valid JSON with `{ received: true }` but
+intentionally performs no payment, settlement or enrollment work. Claim the app first; the
+existing unclaimed middleware still gates this route. See [the operator requirements](./docs/DEPLOY.md#kernel-signed-notifications)
+for public pins, replay storage, rotation and proxy path preservation.
+
 ## The honest test
 
 Every Imajin app before the external integrators was first-party (same repo, same server, privileged access). Apps
 built from this template are the **external-integrator** test: if this app can do everything it needs through app-auth
 and the public API alone, the federated-app boundary is real.
-
-<!-- Kernel webhook verification scaffold tracked in #23. -->

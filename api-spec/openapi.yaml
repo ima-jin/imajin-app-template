@@ -16,6 +16,11 @@ tags:
 
 components:
   securitySchemes:
+    kernelSignature:
+      type: apiKey
+      in: header
+      name: x-kernel-signature
+      description: Ed25519 kernel signature; all five x-kernel-* headers below are required.
     cookieAuth:
       type: apiKey
       in: cookie
@@ -28,6 +33,66 @@ components:
         error: { type: string }
 
 paths:
+  /api/webhooks/kernel:
+    post:
+      operationId: postKernelWebhook
+      summary: Example verified kernel notification receiver
+      description: >
+        The kernel signs; the app verifies raw bytes before parsing or handler effects.
+        Audience must equal this deployment's IMAJIN_APP_DID. Timestamp freshness is
+        inclusive +/-300 seconds and each nonce is accepted once per process.
+        The template handler is a no-op; forks validate payloads and wire domain handlers.
+        The app must be claimed first. Proxies must preserve the signed external path/query.
+      tags: [app-template]
+      security:
+        - kernelSignature: []
+      parameters:
+        - name: x-kernel-audience
+          in: header
+          required: true
+          schema: { type: string }
+          description: Recipient app DID, not the app-token slug.
+        - name: x-kernel-kid
+          in: header
+          required: true
+          schema: { type: string }
+          description: Active kernel signing key identifier from trusted public discovery.
+        - name: x-kernel-timestamp
+          in: header
+          required: true
+          schema: { type: string, pattern: "^[0-9]+$" }
+          description: Unix timestamp in seconds.
+        - name: x-kernel-nonce
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+        - name: x-kernel-signature
+          in: header
+          required: true
+          schema: { type: string, pattern: "^[0-9a-fA-F]{128}$" }
+          description: Detached Ed25519 signature over audience, freshness, nonce, method, path/query and exact body bytes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {}
+      responses:
+        "200":
+          description: Verified JSON handed to the example no-op handler
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received: { type: boolean }
+        "400":
+          description: Signed body is not valid JSON
+        "401":
+          description: Unsigned, invalid, stale, future, replayed, tampered or wrong-audience notification
+        "503":
+          description: Verification unavailable (discovery, trust or store failure); no handler effects
+        "500":
+          description: Handler failed after verification
   /api/health:
     get:
       operationId: getHealth
