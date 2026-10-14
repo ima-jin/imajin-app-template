@@ -153,6 +153,7 @@ middleware.ts      ← gates every route on claim state — unclaimed page, /cla
 route (#2427) — see "This app's own signing key" below.
 
 ## This app's own signing key
+Operators claim this app in the browser at its `/claim` page.
 
 This app never reads a raw private key from env. `instrumentation.ts` fails loud at boot if
 `IMAJIN_APP_PRIVATE_KEY` is set, and instead calls `@ima-jin/auth-client`'s `loadAppSigningKey()`.
