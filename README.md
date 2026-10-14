@@ -38,8 +38,8 @@ The kernel verifies both and returns `{ appDid, userDid, scopes }` — that trip
    empty on purpose). This app refuses to start without `IMAJIN_APP_DID`, `IMAJIN_AUTH_URL`,
    `SESSION_SECRET` and `NEXT_PUBLIC_IMAJIN_APP_ID` set, or if a raw
    `IMAJIN_APP_PRIVATE_KEY` is present (see `instrumentation.ts`) — it fetches its own signing key
-   at boot via `@ima-jin/auth-client`'s `loadAppSigningKey()` instead. **Skip `IMAJIN_APP_CLAIM_CODE`
-   for now**: the operator path is *approve on `/jin` → open `<this app>/claim` → paste the code →
+   at boot via `@ima-jin/auth-client`'s `loadAppSigningKey()` instead. Claim only in the browser:
+   *approve on `/jin` → open `<this app>/claim` → paste the code →
    done* — see [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
 4. **Migrate this app's own database** (its own Postgres schema only — see
    [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md)):
@@ -157,11 +157,10 @@ Operators claim this app in the browser at its `/claim` page.
 
 This app never reads a raw private key from env. `instrumentation.ts` fails loud at boot if
 `IMAJIN_APP_PRIVATE_KEY` is set, and instead calls `@ima-jin/auth-client`'s `loadAppSigningKey()`.
-Without a claim code or keystore yet, this app boots in **unclaimed mode** (#2427): every route
+Without a keystore yet, this app boots in **unclaimed mode** (#2427): every route
 except `/claim`, `/api/claim`, and `/api/health` serves a minimal "not claimed yet" page. The
 operator path: approve provisioning on the kernel's `/jin` → open `<this app>/claim` → paste the
-one-time claim code → done — no ssh, no env edit, no restart. A one-time `IMAJIN_APP_CLAIM_CODE`
-env var still works for automated/CI deploys and takes precedence when set. Either path bootstraps
+one-time claim code → done — no ssh, no env edit, no restart. This is the only claim path; it bootstraps
 a local `0600` keystore (`IMAJIN_APP_KEYSTORE`); every later boot re-authenticates with that
 keystore, no operator action needed. See
 [`docs/REGISTRATION.md`](./docs/REGISTRATION.md#4-claim-this-apps-own-signing-key-7-2427).
