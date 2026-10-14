@@ -168,6 +168,7 @@ describe('declared vault boot acceptance', () => {
         loadFromVaultMock.mockResolvedValue(credentials(failure === 'empty' ? '' : '   '));
       }
       await expect(register()).rejects.toThrow('FAKE_TEST_PROCESS_EXIT');
+      expect(loadFromVaultMock).toHaveBeenCalledTimes(2);
       expect(exit).toHaveBeenCalledTimes(1);
       expect(exit).toHaveBeenCalledWith(1);
       expect(isAppClaimed()).toBe(false);
@@ -213,13 +214,17 @@ describe('declared vault boot acceptance', () => {
 
   it('loads every declared recipe and publishes none if a later declaration fails', async () => {
     claimFixture();
-    manifest.secrets.push({ name: 'FAKE_SECOND_SECRET', kind: 'random-32B' });
+    manifest.secrets.push(
+      { name: 'FAKE_SECOND_SECRET', kind: 'random-32B' },
+      { name: 'FAKE_THIRD_SECRET', kind: 'random-32B' }
+    );
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('FAKE_TEST_PROCESS_EXIT'); });
     loadFromVaultMock.mockResolvedValueOnce(credentials())
       .mockRejectedValueOnce(new Error('FAKE_UNTRUSTED_PROVIDER_TEXT'));
     try {
       await expect(register()).rejects.toThrow('FAKE_TEST_PROCESS_EXIT');
+      expect(loadFromVaultMock).toHaveBeenCalledTimes(2);
       expect(loadFromVaultMock.mock.calls[1][0].keys).toEqual([
         { key: 'FAKE_SECOND_SECRET', onMissing: 'fail' },
       ]);
@@ -228,6 +233,7 @@ describe('declared vault boot acceptance', () => {
       expect(() => getSelfSecret('SESSION_SECRET')).toThrow();
       expect(() => getSelfSecret('FAKE_SECOND_SECRET')).toThrow();
     } finally {
+      manifest.secrets.pop();
       manifest.secrets.pop();
     }
   });
