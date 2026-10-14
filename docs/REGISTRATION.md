@@ -5,45 +5,18 @@ identity — a row in the kernel's app registry — before it can compose the pl
 **refuses to start** without `IMAJIN_APP_DID` set (see `instrumentation.ts`), so registration
 is the first thing a fork must do, before `pnpm dev`.
 
-## 1. Register (self-service)
+## 1. Register and provision through the operator tools
 
-You must already be signed in to the kernel as a developer (a human DID) before calling this —
-the endpoint is `requireAuth`-gated to whoever owns the app being created.
+Use the approved kernel provisioning tool and the operator's `/jin` approval card.
+Review the app's name, callback URL, requested scopes and `imajin.app.json` recipes,
+then countersign the proposal. The kernel issues and seals this app's signing identity
+and declared self-secrets; the operator never generates, reveals or copies their values.
+Record only the public `appDid` and registry `id` in the non-secret app configuration.
+Complete the existing browser claim step below to establish this app's bootstrap keystore.
 
-```bash
-curl -X POST "${IMAJIN_AUTH_URL}/api/registry/apps" \
-  -H "Content-Type: application/json" \
-  -H "Cookie: <your kernel session cookie>" \
-  -d '{
-    "name": "My App",
-    "callbackUrl": "https://my-app.example.com/api/auth/callback",
-    "requestedScopes": ["profile:read"]
-  }'
-```
-
-Response (`201`):
-
-```json
-{
-  "id": "app_xxxxxxxxxxxxxxxx",
-  "ownerDid": "did:imajin:...",
-  "name": "My App",
-  "appDid": "did:imajin:...",
-  "publicKey": "...",
-  "callbackUrl": "https://my-app.example.com/api/auth/callback",
-  "requestedScopes": ["profile:read"],
-  "tier": "third_party",
-  "allowedRedirectHosts": ["https://my-app.example.com"],
-  "status": "active",
-  "keypair": { "privateKey": "...", "publicKey": "..." }
-}
-```
-
-`keypair` is only present when you didn't supply your own `publicKey` — it is shown **once** and
-never stored by the kernel. **Do not put `keypair.privateKey` in `.env` or anywhere in this repo.**
-This template never reads a raw private key from env at all (`instrumentation.ts` fails loud at
-boot if `IMAJIN_APP_PRIVATE_KEY` is set) — see "Fetch this app's own signing key at boot" below for
-how this app actually obtains its signing key.
+Do not issue or transfer key material through a shell command. This template never reads
+a raw private key from env (`instrumentation.ts` fails loud if `IMAJIN_APP_PRIVATE_KEY`
+is set); the published SDK authenticates with the local keystore after claim.
 
 ## 2. Fields, and what they mean for a fork
 
@@ -64,17 +37,17 @@ it's what the "Sign in with Imajin" redirect uses client-side.
 ```bash
 cp .env.example .env.local
 # fill in:
-#   IMAJIN_APP_DID=<appDid from the response above>
-#   NEXT_PUBLIC_IMAJIN_APP_ID=<id from the response above>
+#   IMAJIN_APP_DID=<public appDid from provisioning>
+#   NEXT_PUBLIC_IMAJIN_APP_ID=<public registry id from provisioning>
 #   APP_DB_SCHEMA=<a name for this app's own Postgres schema — see docs/MIGRATIONS.md>
 #   DATABASE_URL=<this app's own Postgres connection string>
 #   IMAJIN_KERNEL_URL=<same host as IMAJIN_AUTH_URL above>
 ```
 
-Provision and seal the session credential through the approved kernel/vault tool step, using
-`/jin` re-sync when directed by that tool. Never generate, view or copy a secret in a shell or
-between env files. This template's vault-backed session loading is tracked separately in #24;
-if the required tool is unavailable, stop rather than creating a credential by hand.
+The kernel issues and seals the names/kinds declared in `imajin.app.json` on provision/claim.
+For an already-claimed app, select **Sync manifest secrets** on `/jin` and countersign the
+proposal, then restart. Never generate, view or copy a secret in a shell or between env files.
+Env holds the keystore path, database connection, kernel URLs and non-secret config only.
 
 Without `IMAJIN_APP_DID` set, or with a raw `IMAJIN_APP_PRIVATE_KEY` still set, `pnpm dev` /
 `pnpm start` throw immediately (`instrumentation.ts`) instead of serving requests no kernel call
@@ -97,7 +70,8 @@ signing key from the kernel, via `@ima-jin/auth-client`'s `loadAppSigningKey()`
 That's it — no ssh, no env file edit, no restart. Behind the scenes, this app's own
 `app/api/claim/route.ts` calls the kernel's `POST /api/apps/claim` on your behalf, writes the
 local bootstrap keystore (`IMAJIN_APP_KEYSTORE`, default `./.imajin/keystore.json`, mode `0600`),
-and hot-swaps the in-memory signing identity immediately — the app is claimed without a restart
+and loads all declared self-secrets through that keystore before adopting the in-memory signing
+identity — the app is claimed without a restart
 (though a restart also works fine afterwards). `/claim` 404s once this succeeds; the code is spent
 and cannot be reused.
 
@@ -127,6 +101,13 @@ Without a usable `X-Forwarded-For`, all callers share one coarse fallback bucket
 Once a keystore exists (from the claim page), every later boot signs a fresh challenge with the
 persisted bootstrap key and fetches the signing key again — no claim code needed, no operator
 action required for an ordinary restart.
+The boot module then awaits the published app-keystore `loadFromVault()` for every manifest
+declaration before serving sessions. Values stay in process memory, never env, disk or logs.
+An unavailable declaration fails closed with one log line naming it and the `/jin` re-sync
+step; there is no env fallback. After **Rotate** + countersign on `/jin`, restart through the
+approved operator tool to fetch the new generation without editing a file. Session rotation
+invalidates existing cookies. To declare another recipe, see
+[Declared self-secrets](../README.md#declared-self-secrets).
 
 If the local keystore is ever lost (disk wipe, redeploy to a fresh host), ask the kernel operator
 to re-approve `apps.provision` with `reissueClaim: true` for a fresh claim code. Redeem it at
@@ -135,13 +116,11 @@ revokes the lost keystore's bootstrap key. See `@ima-jin/auth-client`'s README f
 
 ## 5. List or manage your apps later
 
-```bash
-curl "${IMAJIN_AUTH_URL}/api/registry/apps?owner=me" \
-  -H "Cookie: <your kernel session cookie>"
-```
-
-Revoking or rotating an app's credentials is done through the kernel's admin/developer surface,
-not by this template — see the kernel's own `/auth/developer/apps` UI.
+Use the kernel's public developer/app tools to inspect registry metadata.
+Manage declared self-secrets on `/jin`: **Sync manifest secrets**, **Rotate** or **Revoke**,
+review the proposal and countersign. Restart through the approved operator tool after
+rotation; do not change an env file or copy a credential. A revoked boot-required
+secret prevents the next claimed boot; re-sync does not resurrect it.
 
 ## Kernel notifications
 

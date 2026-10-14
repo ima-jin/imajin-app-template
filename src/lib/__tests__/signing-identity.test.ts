@@ -12,6 +12,14 @@ import {
   resetSigningIdentityForTests,
 } from '../signing-identity';
 
+vi.mock('@ima-jin/auth-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@ima-jin/auth-client')>(),
+  loadFromVault: vi.fn(async () => ({
+    values: { SESSION_SECRET: 'FAKE_VAULT_SESSION_FOR_TEST_ONLY' },
+    degraded: [],
+  })),
+}));
+
 const KERNEL_URL = 'https://dev-jin.imajin.test';
 const SIGNING_IDENTITY_KEY = Symbol.for('imajin.app.signingIdentity');
 

@@ -153,9 +153,12 @@ user, never **from** them. **Moat = legitimacy, not lock-in.**
 - **Sub-agent memory rule:** if you spawn a sub-agent, tell it to append a summary of what it built/changed to
   `docs/worklog/YYYY-MM-DD.md` (create if missing) — what was built, files changed, decisions, status.
 - **Env:** all service URLs come from env vars (`.env.example` is the contract) — **no hard-coded URLs**.
-- **No secrets in the repo.** The session secret lives in `.env`, never committed. This app's own signing key is
-  never put in `.env` at all — it's fetched at boot via `@ima-jin/auth-client`'s `loadAppSigningKey()` (a one-time
-  claim code on first boot, a local `0600` bootstrap keystore on every later boot). See `docs/REGISTRATION.md`.
+- **No secrets in the repo or env.** Declare self-secret recipes in `imajin.app.json`; the kernel issues and
+  seals them on provision/claim. `src/lib/self-secrets.ts` fetches them at boot via the published
+  `@ima-jin/auth-client`'s `loadFromVault()` using this app's local `0600` bootstrap keystore. The session signer
+  reads memory only, never env. This app's own signing key is fetched through `loadAppSigningKey()`.
+  Use `/jin` Sync manifest secrets / Rotate + countersign, then restart; never generate, reveal or copy a
+  credential in a shell or env file. See `docs/REGISTRATION.md`.
 
 ---
 

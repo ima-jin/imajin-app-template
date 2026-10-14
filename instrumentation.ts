@@ -1,4 +1,8 @@
 import { bootstrapSigningIdentity } from '@/lib/signing-identity';
+import { SelfSecretsUnavailableError } from '@/lib/self-secrets';
+import { validateRequiredBootEnv } from './scripts/lib/boot-env.mjs';
+
+export { validateRequiredBootEnv } from './scripts/lib/boot-env.mjs';
 
 /**
  * Next.js instrumentation hook (stable since Next 15) — runs once when the
@@ -39,27 +43,6 @@ export function validateSigningKeyBootEnv(): void {
   }
 }
 
-/**
- * Env every request path depends on: `SESSION_SECRET` signs the session cookie
- * and `IMAJIN_AUTH_URL` is the kernel the auth routes call (src/lib/auth-config.ts
- * reads both with a non-null assertion), `NEXT_PUBLIC_IMAJIN_APP_ID` builds the
- * "Sign in with Imajin" redirect. A missing one doesn't degrade gracefully — it
- * yields an unsigned session or a broken sign-in URL — so boot throws instead
- * (#6): a template that boots half-configured teaches every fork to do the same.
- * All missing names are reported together so one restart fixes the whole env.
- */
-const REQUIRED_APP_ENV = ['IMAJIN_AUTH_URL', 'SESSION_SECRET', 'NEXT_PUBLIC_IMAJIN_APP_ID'] as const;
-
-export function validateRequiredBootEnv(): void {
-  const missing = REQUIRED_APP_ENV.filter((name) => !process.env[name]?.trim());
-  if (missing.length > 0) {
-    throw new Error(
-      `Missing required environment variable(s): ${missing.join(', ')}. ` +
-        'Copy .env.example to .env.local and fill them in — see docs/REGISTRATION.md.'
-    );
-  }
-}
-
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') {
     return;
@@ -67,5 +50,13 @@ export async function register(): Promise<void> {
 
   validateRequiredBootEnv();
   validateSigningKeyBootEnv();
-  await bootstrapSigningIdentity();
+  try {
+    await bootstrapSigningIdentity();
+  } catch (error) {
+    if (error instanceof SelfSecretsUnavailableError) {
+      // The loader emitted the single value-free /jin recovery instruction.
+      process.exit(1);
+    }
+    throw error;
+  }
 }
