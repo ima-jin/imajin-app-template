@@ -55,6 +55,7 @@ function useTempKeystoreDir(tmpPrefix: string): { dir: () => string } {
     resetSigningIdentityForTests();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     await rm(workDir, { recursive: true, force: true });
   });
 
@@ -64,53 +65,58 @@ function useTempKeystoreDir(tmpPrefix: string): { dir: () => string } {
 describe('bootstrapSigningIdentity / getSigningIdentity', () => {
   const tmp = useTempKeystoreDir('imajin-keystore-');
 
-  it('first boot: exchanges a claim code for the signing key and persists a bootstrap keystore', async () => {
-    const keystorePath = join(tmp.dir(), 'keystore.json');
+  it.each(['', 'FAKE_UNUSED_ENV_CLAIM_CODE'])('unclaimed boot ignores the legacy env value %j', async (envValue) => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('NEXT_PUBLIC_BASE_PATH', '/test-app');
+    const keystorePath = join(tmp.dir(), 'never-created.json');
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
-    vi.stubEnv('IMAJIN_APP_CLAIM_CODE', 'one-time-code');
+    vi.stubEnv('IMAJIN_APP_CLAIM_CODE', envValue);
     vi.stubEnv('IMAJIN_APP_DID', '');
-    mockKernelFetch('/api/apps/claim', {
-      appDid: 'did:imajin:app-under-test',
-      privateKey: 'signing-private-key-hex',
-      publicKey: 'signing-public-key-hex',
-    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
 
     await bootstrapSigningIdentity();
+    expect(warning.mock.calls).toEqual(envValue ? [[
+      'IMAJIN_APP_CLAIM_CODE is ignored; claim at /test-app/claim and delete the variable from the env file.',
+    ]] : []);
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('FAKE_UNUSED_ENV_CLAIM_CODE');
 
-    expect(getSigningIdentity()).toEqual({
-      appDid: 'did:imajin:app-under-test',
-      privateKey: 'signing-private-key-hex',
-      publicKey: 'signing-public-key-hex',
-    });
-    expect(isAppClaimed()).toBe(true);
-
-    const keystoreStat = await stat(keystorePath);
-    expect(keystoreStat.mode & 0o777).toBe(0o600);
+    expect(isAppClaimed()).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(() => getSigningIdentity()).toThrow(/not bootstrapped yet/);
+    await expect(stat(keystorePath)).rejects.toThrow();
   });
 
-  it('second boot: signs a challenge with the persisted bootstrap key and skips the claim code', async () => {
+  it.each(['', 'FAKE_UNUSED_ENV_CLAIM_CODE'])('claimed boot uses the persisted key and ignores legacy env %j', async (envValue) => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('NEXT_PUBLIC_BASE_PATH', '');
     const keystorePath = join(tmp.dir(), 'keystore.json');
     writeKeystore(keystorePath, generateBootstrapKeypair());
 
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
-    vi.stubEnv('IMAJIN_APP_CLAIM_CODE', '');
+    vi.stubEnv('IMAJIN_APP_CLAIM_CODE', envValue);
     vi.stubEnv('IMAJIN_APP_DID', 'did:imajin:app-under-test');
     const fetchMock = mockKernelFetch('/api/apps/signing-key/fetch', {
       appDid: 'did:imajin:app-under-test',
-      privateKey: 'signing-private-key-hex',
-      publicKey: 'signing-public-key-hex',
+      privateKey: 'FAKE_SIGNING_PRIVATE_KEY',
+      publicKey: 'FAKE_SIGNING_PUBLIC_KEY',
     });
 
     await bootstrapSigningIdentity();
 
     expect(getSigningIdentity().appDid).toBe('did:imajin:app-under-test');
+    expect(warning.mock.calls).toEqual(envValue ? [[
+      'IMAJIN_APP_CLAIM_CODE is ignored; claim at /claim and delete the variable from the env file.',
+    ]] : []);
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('FAKE_UNUSED_ENV_CLAIM_CODE');
     expect(isAppClaimed()).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, requestInit] = fetchMock.mock.calls[0];
     const requestBody = JSON.parse(requestInit?.body as string);
     expect(requestBody).toMatchObject({ appDid: 'did:imajin:app-under-test' });
+    expect(requestBody.claimCode).toBeUndefined();
     expect(typeof requestBody.signature).toBe('string');
   });
 
@@ -119,12 +125,11 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
     writeKeystore(keystorePath, generateBootstrapKeypair());
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
-    vi.stubEnv('IMAJIN_APP_CLAIM_CODE', '');
     vi.stubEnv('IMAJIN_APP_DID', 'did:imajin:app-under-test');
     mockKernelFetch('/api/apps/signing-key/fetch', {
       appDid: 'did:imajin:app-under-test',
-      privateKey: 'signing-private-key-hex',
-      publicKey: 'signing-public-key-hex',
+      privateKey: 'FAKE_SIGNING_PRIVATE_KEY',
+      publicKey: 'FAKE_SIGNING_PUBLIC_KEY',
     });
 
     // Copy A stands in for the bundle `instrumentation.ts` boots from...
@@ -159,16 +164,15 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
     expect((globalThis as GlobalIdentitySlot)[SIGNING_IDENTITY_KEY]).toBeNull();
   });
 
-  it('unclaimed boot mode (#2427): no keystore and no claim code boots without throwing', async () => {
+  it('unclaimed boot mode (#2427): no keystore boots without throwing', async () => {
     const keystorePath = join(tmp.dir(), 'never-created.json');
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
-    vi.stubEnv('IMAJIN_APP_CLAIM_CODE', '');
     vi.stubEnv('IMAJIN_APP_DID', '');
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
-        throw new Error('fetch should never be called when there is no keystore and no claim code');
+        throw new Error('fetch should never be called when there is no keystore');
       })
     );
 
@@ -178,15 +182,15 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
     expect(() => getSigningIdentity()).toThrow(/not bootstrapped yet/);
   });
 
-  it('still fails loud when a claim code IS provided but the kernel rejects it', async () => {
-    const keystorePath = join(tmp.dir(), 'never-created.json');
+  it('still fails loud when the kernel rejects the persisted bootstrap key', async () => {
+    const keystorePath = join(tmp.dir(), 'keystore.json');
+    writeKeystore(keystorePath, generateBootstrapKeypair());
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
-    vi.stubEnv('IMAJIN_APP_CLAIM_CODE', 'bad-code');
-    vi.stubEnv('IMAJIN_APP_DID', '');
+    vi.stubEnv('IMAJIN_APP_DID', 'did:imajin:app-under-test');
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(JSON.stringify({ error: 'Unrecognized claim code' }), { status: 404 }))
+      vi.fn(async () => new Response(JSON.stringify({ error: 'Unrecognized bootstrap key' }), { status: 404 }))
     );
 
     await expect(bootstrapSigningIdentity()).rejects.toThrow();
@@ -197,20 +201,19 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
 describe('claimWithCode', () => {
   const tmp = useTempKeystoreDir('imajin-claim-page-');
 
-  it('hot-swaps the in-memory signing identity and persists a bootstrap keystore, without needing IMAJIN_APP_CLAIM_CODE', async () => {
+  it('hot-swaps the in-memory signing identity and persists a bootstrap keystore from the browser code only', async () => {
     const keystorePath = join(tmp.dir(), 'keystore.json');
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
-    vi.stubEnv('IMAJIN_APP_CLAIM_CODE', '');
     mockKernelFetch('/api/apps/claim', {
       appDid: 'did:imajin:app-under-test',
-      privateKey: 'signing-private-key-hex',
-      publicKey: 'signing-public-key-hex',
+      privateKey: 'FAKE_SIGNING_PRIVATE_KEY',
+      publicKey: 'FAKE_SIGNING_PUBLIC_KEY',
     });
 
     expect(isAppClaimed()).toBe(false);
 
-    const identity = await claimWithCode({ claimCode: 'operator-pasted-code' });
+    const identity = await claimWithCode({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' });
 
     expect(identity.appDid).toBe('did:imajin:app-under-test');
     expect(isAppClaimed()).toBe(true);
@@ -227,11 +230,11 @@ describe('claimWithCode', () => {
     vi.stubEnv('IMAJIN_APP_DID', 'did:imajin:this-app');
     mockKernelFetch('/api/apps/claim', {
       appDid: 'did:imajin:a-different-app',
-      privateKey: 'signing-private-key-hex',
-      publicKey: 'signing-public-key-hex',
+      privateKey: 'FAKE_SIGNING_PRIVATE_KEY',
+      publicKey: 'FAKE_SIGNING_PUBLIC_KEY',
     });
 
-    await expect(claimWithCode({ claimCode: 'operator-pasted-code' })).rejects.toThrow(AppDidMismatchError);
+    await expect(claimWithCode({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' })).rejects.toThrow(AppDidMismatchError);
 
     expect(isAppClaimed()).toBe(false);
     await expect(stat(keystorePath)).rejects.toThrow();
