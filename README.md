@@ -197,3 +197,4 @@ for public pins, replay storage, rotation and proxy path preservation.
 Every Imajin app before the external integrators was first-party (same repo, same server, privileged access). Apps
 built from this template are the **external-integrator** test: if this app can do everything it needs through app-auth
 and the public API alone, the federated-app boundary is real.
+
