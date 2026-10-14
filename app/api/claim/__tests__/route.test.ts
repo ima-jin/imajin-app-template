@@ -3,9 +3,16 @@ import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetSigningIdentityForTests } from '@/lib/signing-identity';
+import { isAppClaimed, resetSigningIdentityForTests } from '@/lib/signing-identity';
 import { resetClaimRateLimitForTests } from '@/lib/claim-rate-limit';
 import { POST } from '../route';
+
+const { loadFromVaultMock } = vi.hoisted(() => ({ loadFromVaultMock: vi.fn() }));
+
+vi.mock('@ima-jin/auth-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@ima-jin/auth-client')>(),
+  loadFromVault: loadFromVaultMock,
+}));
 
 const KERNEL_URL = 'https://dev-jin.imajin.test';
 const RATE_LIMIT = 5;
@@ -31,6 +38,10 @@ describe('POST /api/claim', () => {
   let workDir: string;
 
   beforeEach(async () => {
+    loadFromVaultMock.mockReset().mockResolvedValue({
+      values: { SESSION_SECRET: 'FAKE_VAULT_SESSION_FOR_TEST_ONLY' },
+      degraded: [],
+    });
     workDir = await mkdtemp(join(tmpdir(), 'imajin-claim-route-'));
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', join(workDir, 'keystore.json'));
@@ -62,6 +73,28 @@ describe('POST /api/claim', () => {
 
     const keystoreStat = await stat(join(workDir, 'keystore.json'));
     expect(keystoreStat.mode & 0o777).toBe(0o600);
+  });
+
+  it('fails closed after claim if vault loading fails, without a duplicate or value-bearing log', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockKernelClaim({
+      appDid: 'did:imajin:app-under-test',
+      privateKey: 'FAKE_SIGNING_PRIVATE_KEY',
+      publicKey: 'FAKE_SIGNING_PUBLIC_KEY',
+    });
+    loadFromVaultMock.mockRejectedValue(new Error('FAKE_UNTRUSTED_PROVIDER_TEXT'));
+
+    const response = await POST(postRequest({ claimCode: 'FAKE_BROWSER_CLAIM_CODE' }) as never);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: 'App credentials unavailable. Re-sync manifest secrets on /jin, then restart this app.',
+    });
+    expect(isAppClaimed()).toBe(false);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0][0]).toContain('SESSION_SECRET');
+    expect(log.mock.calls[0][0]).toContain('/jin');
+    expect(JSON.stringify(log.mock.calls)).not.toContain('FAKE_UNTRUSTED_PROVIDER_TEXT');
   });
 
   it('rejects a missing claim code without calling the kernel', async () => {

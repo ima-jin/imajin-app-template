@@ -27,6 +27,15 @@ checkouts with separate identities**: each has its own app DID, claim code and k
 
 ## The deploy sequence
 
+**Vault upgrade order — on each environment:** deploy a kernel that includes
+ima-jin/imajin-ai#2801 first, then select **Sync manifest secrets** on `/jin` and
+countersign the proposal for this app's `imajin.app.json`, **before upgrading this app**.
+Skipping this order makes an already-claimed app fail closed at boot with exit code 1.
+Do these steps through the approved operator tools; no secret is generated, revealed,
+pasted or copied by the operator. Fresh provision/claim issues and seals the declarations.
+Rotation also happens on `/jin` with a countersignature, then an app restart fetches the
+replacement into memory without any file edit.
+
 Run from the target's own checkout on the server. Every step is fail-fast: any failure before the restart leaves the
 running process serving the previous build.
 
@@ -47,7 +56,9 @@ running process serving the previous build.
    (`"claimed":false`) is the expected state on an environment's first deploy: the identity is minted by an operator
    at `<app>/claim`, never by the deploy.
 
-The env file is the single source of truth. `node --env-file` and `pm2 --update-env` both let the *calling shell's*
+The env file holds non-secret configuration (plus `DATABASE_URL`), never self-secrets.
+The app keystore authenticates vault fetches; credential values live only in memory.
+`node --env-file` and `pm2 --update-env` both let the *calling shell's*
 environment win over the file, so a stray `DATABASE_URL` exported in the deployer's shell would silently point the
 build, the migration and the pm2 process at the wrong database. Unset the app's contract variables (the names in
 `.env.example`) before deploying, or deploy from a clean shell.
@@ -83,8 +94,8 @@ function app(name, port) {
     args: `start -p ${port}`,
     interpreter: 'node',
     // Node exits if the file is missing — deliberate: an app that cannot load
-    // its env must crash loudly, not boot without its identity. Secrets stay
-    // in the untracked .env.local; only its path is versioned.
+    // its config must crash loudly, not boot without its identity. Self-secrets
+    // come from the kernel vault into memory only, never this config file.
     node_args: `--env-file=${path.join(root, '.env.local')}`,
     exec_mode: 'fork',
     env: { PORT: port, NODE_ENV: 'production' },

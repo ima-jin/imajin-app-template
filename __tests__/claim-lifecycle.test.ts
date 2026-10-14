@@ -12,6 +12,14 @@ import { GET } from '../app/api/health/route';
 import { resetSigningIdentityForTests } from '@/lib/signing-identity';
 import { resetClaimRateLimitForTests } from '@/lib/claim-rate-limit';
 
+vi.mock('@ima-jin/auth-client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@ima-jin/auth-client')>(),
+  loadFromVault: vi.fn(async () => ({
+    values: { SESSION_SECRET: 'FAKE_VAULT_SESSION_FOR_TEST_ONLY' },
+    degraded: [],
+  })),
+}));
+
 describe('browser-only claim lifecycle', () => {
   let workDir: string;
   const appDid = 'did:imajin:app-under-test';
@@ -23,7 +31,7 @@ describe('browser-only claim lifecycle', () => {
     vi.stubEnv('NEXT_PUBLIC_BASE_PATH', '/test-app');
     vi.stubEnv('IMAJIN_AUTH_URL', 'https://kernel.example.test');
     vi.stubEnv('IMAJIN_KERNEL_URL', 'https://kernel.example.test');
-    vi.stubEnv('SESSION_SECRET', 'FAKE_SESSION_SECRET_FOR_TEST_ONLY');
+    vi.stubEnv('SESSION_SECRET', '');
     vi.stubEnv('NEXT_PUBLIC_IMAJIN_APP_ID', 'app_under_test');
     vi.stubEnv('IMAJIN_APP_PRIVATE_KEY', '');
     vi.stubEnv('IMAJIN_APP_DID', appDid);

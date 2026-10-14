@@ -25,6 +25,9 @@ export async function bootstrapSelfSecrets(appDid: string): Promise<void> {
   clearSelfSecrets();
   const values: Record<string, string> = Object.create(null);
   for (const { name } of manifest.secrets) {
+    if (process.env[name]) {
+      console.warn(`${name} ignored; issued by the kernel vault; delete it`);
+    }
     try {
       // One required declaration per call lets a value-free SDK error be
       // attributed precisely, including when forks add more declarations.

@@ -47,7 +47,7 @@ describe('validateRequiredBootEnv', () => {
 
   function stubValidEnv() {
     vi.stubEnv('IMAJIN_AUTH_URL', 'https://kernel.example.test');
-    vi.stubEnv('SESSION_SECRET', 'session-secret-under-test');
+    vi.stubEnv('IMAJIN_KERNEL_URL', 'https://kernel.example.test');
     vi.stubEnv('NEXT_PUBLIC_IMAJIN_APP_ID', 'app_under_test');
   }
 
@@ -58,7 +58,7 @@ describe('validateRequiredBootEnv', () => {
     expect(() => validateRequiredBootEnv()).not.toThrow();
   });
 
-  it.each(['IMAJIN_AUTH_URL', 'SESSION_SECRET', 'NEXT_PUBLIC_IMAJIN_APP_ID'])(
+  it.each(['IMAJIN_AUTH_URL', 'IMAJIN_KERNEL_URL', 'NEXT_PUBLIC_IMAJIN_APP_ID'])(
     'throws naming %s when it is empty',
     async (name) => {
       stubValidEnv();
@@ -71,20 +71,20 @@ describe('validateRequiredBootEnv', () => {
 
   it('treats a whitespace-only value as missing', async () => {
     stubValidEnv();
-    vi.stubEnv('SESSION_SECRET', '   ');
+    vi.stubEnv('IMAJIN_KERNEL_URL', '   ');
     const { validateRequiredBootEnv } = await import('../instrumentation');
 
-    expect(() => validateRequiredBootEnv()).toThrow(/SESSION_SECRET/);
+    expect(() => validateRequiredBootEnv()).toThrow(/IMAJIN_KERNEL_URL/);
   });
 
   it('reports every missing variable in one error', async () => {
     vi.stubEnv('IMAJIN_AUTH_URL', '');
-    vi.stubEnv('SESSION_SECRET', '');
+    vi.stubEnv('IMAJIN_KERNEL_URL', '');
     vi.stubEnv('NEXT_PUBLIC_IMAJIN_APP_ID', '');
     const { validateRequiredBootEnv } = await import('../instrumentation');
 
     expect(() => validateRequiredBootEnv()).toThrow(
-      /IMAJIN_AUTH_URL, SESSION_SECRET, NEXT_PUBLIC_IMAJIN_APP_ID/
+      /IMAJIN_AUTH_URL, IMAJIN_KERNEL_URL, NEXT_PUBLIC_IMAJIN_APP_ID/
     );
   });
 });
@@ -103,10 +103,23 @@ describe('register', () => {
     expect(bootstrapSigningIdentityMock).not.toHaveBeenCalled();
   });
 
+  it('propagates an identity-bootstrap failure without treating it as a vault-secret failure', async () => {
+    vi.stubEnv('NEXT_RUNTIME', 'nodejs');
+    vi.stubEnv('IMAJIN_AUTH_URL', 'https://kernel.example.test');
+    vi.stubEnv('IMAJIN_KERNEL_URL', 'https://kernel.example.test');
+    vi.stubEnv('NEXT_PUBLIC_IMAJIN_APP_ID', 'app_under_test');
+    vi.stubEnv('IMAJIN_APP_PRIVATE_KEY', '');
+    vi.stubEnv('IMAJIN_APP_DID', 'did:imajin:app-under-test');
+    bootstrapSigningIdentityMock.mockRejectedValue(new Error('FAKE_BOOTSTRAP_FAILURE'));
+    const { register } = await import('../instrumentation');
+
+    await expect(register()).rejects.toThrow('FAKE_BOOTSTRAP_FAILURE');
+  });
+
   it('bootstraps the signing identity once the boot env is valid', async () => {
     vi.stubEnv('NEXT_RUNTIME', 'nodejs');
     vi.stubEnv('IMAJIN_AUTH_URL', 'https://kernel.example.test');
-    vi.stubEnv('SESSION_SECRET', 'session-secret-under-test');
+    vi.stubEnv('IMAJIN_KERNEL_URL', 'https://kernel.example.test');
     vi.stubEnv('NEXT_PUBLIC_IMAJIN_APP_ID', 'app_under_test');
     vi.stubEnv('IMAJIN_APP_PRIVATE_KEY', '');
     vi.stubEnv('IMAJIN_APP_DID', 'did:imajin:app-under-test');
@@ -121,7 +134,7 @@ describe('register', () => {
   it('refuses to boot, before bootstrapping, when required env is missing', async () => {
     vi.stubEnv('NEXT_RUNTIME', 'nodejs');
     vi.stubEnv('IMAJIN_AUTH_URL', '');
-    vi.stubEnv('SESSION_SECRET', 'session-secret-under-test');
+    vi.stubEnv('IMAJIN_KERNEL_URL', 'https://kernel.example.test');
     vi.stubEnv('NEXT_PUBLIC_IMAJIN_APP_ID', 'app_under_test');
     vi.stubEnv('IMAJIN_APP_PRIVATE_KEY', '');
     vi.stubEnv('IMAJIN_APP_DID', 'did:imajin:app-under-test');

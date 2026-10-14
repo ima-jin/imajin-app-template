@@ -36,15 +36,18 @@ The kernel verifies both and returns `{ appDid, userDid, scopes }` — that trip
    `NEXT_PUBLIC_IMAJIN_APP_ID`, `APP_DB_SCHEMA`, `DATABASE_URL`, and
    `IMAJIN_KERNEL_URL`, plus `IMAJIN_AUTH_URL` / `NEXT_PUBLIC_IMAJIN_AUTH_URL` (the kernel base URL — shipped
    empty on purpose). This app refuses to start without `IMAJIN_APP_DID`, `IMAJIN_AUTH_URL`,
-   `SESSION_SECRET` and `NEXT_PUBLIC_IMAJIN_APP_ID` set, or if a raw
+   `IMAJIN_KERNEL_URL` and `NEXT_PUBLIC_IMAJIN_APP_ID` set, or if a raw
    `IMAJIN_APP_PRIVATE_KEY` is present (see `instrumentation.ts`) — it fetches its own signing key
    at boot via `@ima-jin/auth-client`'s `loadAppSigningKey()` instead. Claim only in the browser:
    *approve on `/jin` → open `<this app>/claim` → paste the code →
    done* — see [`docs/REGISTRATION.md`](./docs/REGISTRATION.md).
-   Provision/seal the session credential through approved kernel/vault tooling; never make or copy
-   a secret in a shell or env file. Vault-backed session loading is separate work (#24); if the
-   approved tool path is unavailable, stop rather than inventing a credential. For kernel
+   The kernel issues and seals the declared self-secrets during provision/claim; boot fetches
+   them using the app keystore, into memory only. Never make or copy a secret in a shell or
+   env file. For an already-claimed app, use `/jin` **Sync manifest secrets** and countersign
+   before restarting. For kernel
    notifications set the non-secret `AUTH_SERVICE_URL` (kernel auth URL including `/auth`).
+   `pnpm check-env` checks the required auth config in the process environment without
+   reading a keystore or requiring any self-secret in env.
 4. **Migrate this app's own database** (its own Postgres schema only — see
    [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md)):
    ```bash
@@ -150,6 +153,7 @@ scripts/           ← CI gate CLIs (audit-gate, check-migrations, check-registr
 .github/           ← workflows (CI, Security Audit, Check Migrations, SonarCloud) + audit-baseline.json — see AGENTS.md §6
 api-spec/          ← this app's own OpenAPI document, served at /api/spec
 instrumentation.ts ← boot-env guards + loadAppSigningKey() bootstrap (see docs/REGISTRATION.md)
+imajin.app.json    ← registered-app self-secret recipes (names and kinds only)
 middleware.ts      ← gates every route on claim state — unclaimed page, /claim 404 once claimed (#2427)
 ```
 
@@ -168,6 +172,27 @@ one-time claim code → done — no ssh, no env edit, no restart. This is the on
 a local `0600` keystore (`IMAJIN_APP_KEYSTORE`); every later boot re-authenticates with that
 keystore, no operator action needed. See
 [`docs/REGISTRATION.md`](./docs/REGISTRATION.md#4-claim-this-apps-own-signing-key-7-2427).
+
+## Declared self-secrets
+
+`imajin.app.json` declares this app's session-signing recipe. After retrieving the signing
+identity, `src/lib/self-secrets.ts` awaits `@ima-jin/auth-client@0.8.18`'s app-keystore
+`loadFromVault()` before the app becomes usable. Session routes read the resulting memory
+slot lazily, even across Next.js bundles. Env credentials are never used as a fallback.
+Unclaimed mode still serves only the claim/health surfaces; successful browser claim loads
+the declarations before adopting the identity.
+
+To add another self-secret, add a `{ "name": "YOUR_SECRET_NAME", "kind": "random-32B" }`
+recipe (`random-64B` is also supported) to the manifest, then use `getSelfSecret('YOUR_SECRET_NAME')`
+server-side at request time. The boot module loads every declaration with `onMissing: 'fail'`
+and publishes only after all succeed. Do not add it to env or expose it to the browser.
+Provision/claim issues and seals new recipes; for an existing app, select **Sync manifest secrets**
+on `/jin` and countersign the proposal, then restart. If a declared secret is unavailable,
+boot fails closed with one value-free operator instruction naming it.
+
+To rotate, select **Rotate** on `/jin`, countersign, and restart through the approved operator
+tool. The next boot picks up the new value without an env/file edit. Session rotation invalidates
+old cookies, so users sign in again. No values are printed, persisted or copied.
 
 ## Mounting under a path prefix
 

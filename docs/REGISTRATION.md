@@ -71,10 +71,10 @@ cp .env.example .env.local
 #   IMAJIN_KERNEL_URL=<same host as IMAJIN_AUTH_URL above>
 ```
 
-Provision and seal the session credential through the approved kernel/vault tool step, using
-`/jin` re-sync when directed by that tool. Never generate, view or copy a secret in a shell or
-between env files. This template's vault-backed session loading is tracked separately in #24;
-if the required tool is unavailable, stop rather than creating a credential by hand.
+The kernel issues and seals the names/kinds declared in `imajin.app.json` on provision/claim.
+For an already-claimed app, select **Sync manifest secrets** on `/jin` and countersign the
+proposal, then restart. Never generate, view or copy a secret in a shell or between env files.
+Env holds the keystore path, database connection, kernel URLs and non-secret config only.
 
 Without `IMAJIN_APP_DID` set, or with a raw `IMAJIN_APP_PRIVATE_KEY` still set, `pnpm dev` /
 `pnpm start` throw immediately (`instrumentation.ts`) instead of serving requests no kernel call
@@ -97,7 +97,8 @@ signing key from the kernel, via `@ima-jin/auth-client`'s `loadAppSigningKey()`
 That's it — no ssh, no env file edit, no restart. Behind the scenes, this app's own
 `app/api/claim/route.ts` calls the kernel's `POST /api/apps/claim` on your behalf, writes the
 local bootstrap keystore (`IMAJIN_APP_KEYSTORE`, default `./.imajin/keystore.json`, mode `0600`),
-and hot-swaps the in-memory signing identity immediately — the app is claimed without a restart
+and loads all declared self-secrets through that keystore before adopting the in-memory signing
+identity — the app is claimed without a restart
 (though a restart also works fine afterwards). `/claim` 404s once this succeeds; the code is spent
 and cannot be reused.
 
@@ -127,6 +128,13 @@ Without a usable `X-Forwarded-For`, all callers share one coarse fallback bucket
 Once a keystore exists (from the claim page), every later boot signs a fresh challenge with the
 persisted bootstrap key and fetches the signing key again — no claim code needed, no operator
 action required for an ordinary restart.
+The boot module then awaits the published app-keystore `loadFromVault()` for every manifest
+declaration before serving sessions. Values stay in process memory, never env, disk or logs.
+An unavailable declaration fails closed with one log line naming it and the `/jin` re-sync
+step; there is no env fallback. After **Rotate** + countersign on `/jin`, restart through the
+approved operator tool to fetch the new generation without editing a file. Session rotation
+invalidates existing cookies. To declare another recipe, see
+[Declared self-secrets](../README.md#declared-self-secrets).
 
 If the local keystore is ever lost (disk wipe, redeploy to a fresh host), ask the kernel operator
 to re-approve `apps.provision` with `reissueClaim: true` for a fresh claim code. Redeem it at
