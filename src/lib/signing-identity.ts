@@ -5,6 +5,7 @@ import {
   resolveKeystorePath,
   type AppSigningKey,
 } from '@ima-jin/auth-client';
+import { withBasePath } from './base-path';
 
 /**
  * This app's own vault signing key (#7, #2427, mirrors `ima-jin/imajin-ai`'s
@@ -79,6 +80,11 @@ function hasKeystore(): boolean {
  * silently unsigned.
  */
 export async function bootstrapSigningIdentity(): Promise<void> {
+  if (process.env.IMAJIN_APP_CLAIM_CODE) {
+    console.warn(
+      `IMAJIN_APP_CLAIM_CODE is ignored; claim at ${withBasePath('/claim')} and delete the variable from the env file.`
+    );
+  }
   if (!hasKeystore()) {
     return;
   }

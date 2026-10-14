@@ -55,6 +55,7 @@ function useTempKeystoreDir(tmpPrefix: string): { dir: () => string } {
     resetSigningIdentityForTests();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     await rm(workDir, { recursive: true, force: true });
   });
 
@@ -65,6 +66,8 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
   const tmp = useTempKeystoreDir('imajin-keystore-');
 
   it.each(['', 'FAKE_UNUSED_ENV_CLAIM_CODE'])('unclaimed boot ignores the legacy env value %j', async (envValue) => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('NEXT_PUBLIC_BASE_PATH', '/test-app');
     const keystorePath = join(tmp.dir(), 'never-created.json');
     vi.stubEnv('IMAJIN_KERNEL_URL', KERNEL_URL);
     vi.stubEnv('IMAJIN_APP_KEYSTORE', keystorePath);
@@ -74,6 +77,10 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await bootstrapSigningIdentity();
+    expect(warning.mock.calls).toEqual(envValue ? [[
+      'IMAJIN_APP_CLAIM_CODE is ignored; claim at /test-app/claim and delete the variable from the env file.',
+    ]] : []);
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('FAKE_UNUSED_ENV_CLAIM_CODE');
 
     expect(isAppClaimed()).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -82,6 +89,8 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
   });
 
   it.each(['', 'FAKE_UNUSED_ENV_CLAIM_CODE'])('claimed boot uses the persisted key and ignores legacy env %j', async (envValue) => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('NEXT_PUBLIC_BASE_PATH', '');
     const keystorePath = join(tmp.dir(), 'keystore.json');
     writeKeystore(keystorePath, generateBootstrapKeypair());
 
@@ -98,6 +107,10 @@ describe('bootstrapSigningIdentity / getSigningIdentity', () => {
     await bootstrapSigningIdentity();
 
     expect(getSigningIdentity().appDid).toBe('did:imajin:app-under-test');
+    expect(warning.mock.calls).toEqual(envValue ? [[
+      'IMAJIN_APP_CLAIM_CODE is ignored; claim at /claim and delete the variable from the env file.',
+    ]] : []);
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('FAKE_UNUSED_ENV_CLAIM_CODE');
     expect(isAppClaimed()).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [, requestInit] = fetchMock.mock.calls[0];
