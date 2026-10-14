@@ -6,10 +6,12 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const read = (path: string) => readFileSync(`${root}${path}`, 'utf8');
 
 describe('kernel webhook template contract', () => {
-  it('pins the published auth SDK and lockfile exactly to 0.8.18', () => {
+  it('pins both published auth SDKs and lockfile exactly to 0.8.18', () => {
     const { dependencies } = JSON.parse(read('package.json'));
-    expect(dependencies['@ima-jin/auth']).toBe('0.8.18');
-    expect(read('pnpm-lock.yaml')).toContain("'@ima-jin/auth':\n        specifier: 0.8.18");
+    for (const name of ['@ima-jin/auth', '@ima-jin/auth-client']) {
+      expect(dependencies[name]).toBe('0.8.18');
+      expect(read('pnpm-lock.yaml')).toContain(`'${name}':\n        specifier: 0.8.18`);
+    }
   });
 
   it('has no shared callback credential or secret-generation guidance in operator surfaces', () => {
