@@ -66,11 +66,15 @@ cp .env.example .env.local
 # fill in:
 #   IMAJIN_APP_DID=<appDid from the response above>
 #   NEXT_PUBLIC_IMAJIN_APP_ID=<id from the response above>
-#   SESSION_SECRET=$(openssl rand -hex 32)
 #   APP_DB_SCHEMA=<a name for this app's own Postgres schema — see docs/MIGRATIONS.md>
 #   DATABASE_URL=<this app's own Postgres connection string>
 #   IMAJIN_KERNEL_URL=<same host as IMAJIN_AUTH_URL above>
 ```
+
+Provision and seal the session credential through the approved kernel/vault tool step, using
+`/jin` re-sync when directed by that tool. Never generate, view or copy a secret in a shell or
+between env files. This template's vault-backed session loading is tracked separately in #24;
+if the required tool is unavailable, stop rather than creating a credential by hand.
 
 Without `IMAJIN_APP_DID` set, or with a raw `IMAJIN_APP_PRIVATE_KEY` still set, `pnpm dev` /
 `pnpm start` throw immediately (`instrumentation.ts`) instead of serving requests no kernel call
@@ -138,3 +142,12 @@ curl "${IMAJIN_AUTH_URL}/api/registry/apps?owner=me" \
 
 Revoking or rotating an app's credentials is done through the kernel's admin/developer surface,
 not by this template — see the kernel's own `/auth/developer/apps` UI.
+
+## Kernel notifications
+
+The kernel signs and the app verifies with `verifyKernelWebhook` from the published SDK.
+Configure this deployment's public `IMAJIN_APP_DID` and `AUTH_SERVICE_URL` (including `/auth`);
+no callback credential is generated, provisioned or exchanged. Register your fork's callback
+destination through the kernel's public app/tool surface, preserving its external path prefix.
+Wire your own handler as described in [the README](../README.md#kernel-notifications-the-kernel-signs-the-app-verifies).
+See [Deploy](./DEPLOY.md#kernel-signed-notifications) for discovery, trust and replay requirements.

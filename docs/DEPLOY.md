@@ -148,6 +148,42 @@ Verify: `curl -fsS https://jin.imajin.ai/<app>/api/health` returns `{"status":"o
   in `.env.local`. Never a kernel database role.
 - **Add the Caddy route** above to the host's site block.
 
+## Kernel-signed notifications
+
+The kernel signs; the app verifies. `/api/webhooks/kernel` uses the public SDK 0.8.18 and
+requires no shared callback credential. Set the non-secret `IMAJIN_APP_DID` to this environment's
+registered app DID and `AUTH_SERVICE_URL` to its kernel auth URL including `/auth`. A claimed
+app accepts signed JSON and calls the example handler; an unclaimed app retains the existing
+claim gate. Replace the no-op handler in your fork as described in the README.
+
+All five headers are required: `x-kernel-audience`, `x-kernel-kid`, `x-kernel-timestamp`,
+`x-kernel-nonce` and `x-kernel-signature`. The SDK authenticates Ed25519 signatures binding
+audience, timestamp, nonce, method, external path/query and exact body bytes before parsing.
+Authentication failures (including replay, stale/future, tampering and wrong audience) return
+401; signed non-JSON returns 400; discovery, trust or store failures return 503 with no handler
+effects. Handler failures after verification return 500.
+
+Public discovery at `{AUTH_SERVICE_URL}/.well-known/kernel-signing-key` bootstraps over trusted
+HTTPS (loopback HTTP is supported for local development). Persist the SDK's
+`data/kernel-webhook-pins/` under the process cwd on writable, protected storage, separate per
+environment and preserved across upgrades/rollbacks. These are public keys, not secrets.
+The default pin adapter requires trusted Linux util-linux `/usr/bin/flock` and a filesystem
+supporting advisory locks; provision prerequisites through the host/image tool flow.
+Rotation must publish overlapping old/new keys through the kernel's rotation tool step.
+Never delete pins to bypass a trust failure; investigate discovery/rotation instead.
+
+The default atomic nonce store is process-wide and accepts each nonce once within the inclusive
+±300-second freshness window. It is **not restart-safe or shared across workers**. This scaffold
+is for one process: before adding workers/replicas, or requiring replay protection across
+restarts, inject a shared durable `KernelWebhookNonceStore` through the verifier's `nonceStore`
+option. Its `consume` must atomically insert-if-absent with expiry and fail closed on storage
+failure; never use read-then-insert or roll back replay evidence with business work. Retries
+need a fresh nonce/signature plus business idempotency in your handler. Synchronize host clocks.
+
+Caddy must preserve the signed external `/<app>/api/webhooks/kernel` prefix and query string
+(`handle`, not `handle_path` as above). Do not rewrite body bytes or signature headers.
+No deploy behavior changes are required by this scaffold; this work does not deploy anything.
+
 ## Troubleshooting
 
 - **Health never goes green on a first boot** — `pm2 logs <name>`: a used or rejected claim code, a wrong
