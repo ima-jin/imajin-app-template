@@ -65,7 +65,8 @@ After checkout (steps 1–2), run steps 3–7 in your host-owned deploy command 
 clean checkout's full SHA, records `in_progress`, runs the command, then polls the
 public `<app URL>/api/build` for the exact SHA and repository before `success`.
 A command failure or stale/unreachable build records `failure` and exits nonzero.
-The app URL includes any base path. The GitHub environment is exactly `dev` or `prod`;
+The app URL is read from trusted host configuration `NEXT_PUBLIC_APP_URL`, including
+any base path, never from a CLI-supplied URL. The GitHub environment is exactly `dev` or `prod`;
 only `prod` is marked production. Existing successful deployments become inactive.
 
 The credential must be a short-lived **GitHub App installation token**, installed on
@@ -81,8 +82,8 @@ For a host with `gh` already authenticated as that App installation:
 # The host-owned command performs steps 3–7 above, failing on any error.
 # Keep pipefail enabled so credential-provider failures also fail the deploy.
 set -o pipefail
-gh auth token | node scripts/deploy.mjs \
-  --environment dev --url "$NEXT_PUBLIC_APP_URL" -- \
+gh auth token | node --env-file=.env.local scripts/deploy.mjs \
+  --environment dev -- \
   /absolute/path/to/host-deploy-command
 ```
 

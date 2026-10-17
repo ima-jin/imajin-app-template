@@ -21,7 +21,7 @@ const nextConfig = {
   },
 };
 
-module.exports = async () => {
+module.exports = async function buildConfig() {
   const { computeBuildInfo } = await import('./scripts/lib/build-info.mjs');
   const { readFile } = await import('node:fs/promises');
   const { version } = JSON.parse(await readFile(`${__dirname}/package.json`, 'utf8'));

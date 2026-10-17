@@ -36,8 +36,8 @@ try {
       if (result.error || result.status !== 0) throw new Error('Deploy command failed.');
     },
   });
-  console.log(`GitHub Deployment ${id}: success (${options.environment}, ${sha}).`);
+  console.log(JSON.stringify({ event: 'deployment_success', id, environment: options.environment, sha }));
 } catch (error) {
-  console.error(error instanceof Error ? error.message : 'Deployment failed.');
+  console.error(JSON.stringify({ error: error instanceof Error ? error.message : 'Deployment failed.' }));
   process.exitCode = 1;
 }

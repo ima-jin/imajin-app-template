@@ -8,17 +8,20 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 describe('deployment CLI contract', () => {
   it('requires dev/prod, an absolute command, and a safe URL', () => {
-    expect(deploymentArgs(['--environment', 'dev', '--url', `${build.url}/`, '--', '/usr/bin/true'])).toEqual({
+    expect(deploymentArgs(['--environment', 'dev', '--', '/usr/bin/true'], `${build.url}/`)).toEqual({
       environment: 'dev', url: build.url, command: ['/usr/bin/true'],
     });
-    expect(deploymentArgs(['--environment', 'prod', '--url', 'http://127.0.0.1:3000', '--', '/bin/sh', 'deploy.sh']).environment).toBe('prod');
+    expect(deploymentArgs(['--environment', 'prod', '--', '/bin/sh', 'deploy.sh'], 'http://127.0.0.1:3000').environment).toBe('prod');
     for (const args of [
-      [], ['--environment', 'staging'], ['--environment', 'dev', '--url', build.url, '--', 'relative'],
-    ]) expect(() => deploymentArgs(args)).toThrow('Usage:');
+      [], ['--environment', 'staging'], ['--environment', 'dev', '--', 'relative'],
+    ]) expect(() => deploymentArgs(args, build.url)).toThrow('Usage:');
+    expect(() => deploymentArgs(['--environment', 'dev', '--', '/bin/sh'], '')).toThrow('Usage:');
+    expect(() => deploymentArgs(['--url', build.url])).toThrow();
     for (const url of ['http://public.test', 'https://u:p@app.test', 'https://app.test/?query', 'https://app.test/#hash']) {
-      expect(() => deploymentArgs(['--environment', 'dev', '--url', url, '--', '/bin/sh'])).toThrow('Deploy URL');
+      expect(() => deploymentArgs(['--environment', 'dev', '--', '/bin/sh'], url)).toThrow('Deploy URL');
     }
   });
+
 });
 
 describe('GitHub App authentication', () => {
@@ -66,6 +69,13 @@ describe('GitHub Deployment lifecycle', () => {
     ));
     return { github, deploy: vi.fn(), verify: vi.fn() };
   }
+
+  it.each(['../statuses', '42/path', -1, 0, 1.5])('rejects an API-supplied unsafe deployment ID: %s', async (id) => {
+    const dependencies = fixture();
+    dependencies.github.mockResolvedValue({ id });
+    await expect(recordDeployment(build, dependencies)).rejects.toThrow('did not create');
+    expect(dependencies.deploy).not.toHaveBeenCalled();
+  });
 
   it.each(['dev', 'prod'])('records a verified %s deployment with success', async (environment) => {
     const dependencies = fixture();
