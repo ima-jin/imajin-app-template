@@ -30,7 +30,7 @@ export const config = {
 };
 
 /** Routes servable before this app has been claimed. Every other route gets the "not claimed yet" page. */
-const ALLOWED_WHEN_UNCLAIMED = new Set(['/claim', '/api/claim', '/api/health']);
+const ALLOWED_WHEN_UNCLAIMED = new Set(['/claim', '/api/claim', '/api/health', '/api/build']);
 
 /** Routes that stop existing once this app has been claimed — the claim code is single-use. */
 const GATED_AFTER_CLAIM = new Set(['/claim', '/api/claim']);
