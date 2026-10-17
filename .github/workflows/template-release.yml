@@ -1,0 +1,127 @@
+name: Template release cascade
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published v* release tag to retry
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Serialize all releases, not only the same tag: join issues must not race.
+concurrency:
+  group: template-release-cascade
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    if: >-
+      github.repository == 'ima-jin/imajin-app-template' &&
+      (github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'v'))
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.apps.outputs.apps }}
+      sha: ${{ steps.release.outputs.sha }}
+      tag: ${{ steps.release.outputs.tag }}
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      # Execute only reviewed main-branch cascade code, never tag-authored code.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Validate published release and main ancestry
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          node --input-type=module -e 'import { branchFor } from "./scripts/lib/template-cascade.mjs"; branchFor(process.env.TAG)'
+          release=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")
+          test "$(printf '%s' "$release" | jq -r .draft)" = false
+          test "$(printf '%s' "$release" | jq -r .target_commitish)" = main
+          git merge-base --is-ancestor "refs/tags/$TAG" HEAD
+          {
+            printf 'tag=%s\n' "$TAG"
+            printf 'sha=%s\n' "$(git rev-parse "refs/tags/$TAG^{commit}")"
+            printf 'release_id=%s\n' "$(printf '%s' "$release" | jq -r .id)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Read registry (temporary fallback until imajin-ai#2905)
+        id: apps
+        env:
+          TEMPLATE_TAG: ${{ steps.release.outputs.tag }}
+          TEMPLATE_REGISTRY_URL: ${{ vars.TEMPLATE_REGISTRY_URL }}
+        run: node scripts/template-cascade.mjs discover
+
+  cascade:
+    needs: discover
+    runs-on: ubuntu-latest
+    # Each environment contains a short-lived token for THAT owner's App
+    # installation. Never use the template installation for another org.
+    environment: template-cascade-${{ matrix.app.owner }}
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        app: ${{ fromJSON(needs.discover.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.discover.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Merge on sync branch and create or update PR
+        env:
+          GH_TOKEN: ${{ secrets.WARP_FACTORIES_TOKEN }}
+          CASCADE_APP: ${{ toJSON(matrix.app) }}
+          TEMPLATE_TAG: ${{ needs.discover.outputs.tag }}
+          TEMPLATE_SHA: ${{ needs.discover.outputs.sha }}
+        run: node scripts/template-cascade.mjs sync
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: cascade-${{ matrix.app.owner }}-${{ strategy.job-index }}
+          path: cascade-results/*.json
+          retention-days: 7
+          if-no-files-found: warn
+
+  report:
+    needs: [discover, cascade]
+    if: always() && needs.discover.result == 'success'
+    runs-on: ubuntu-latest
+    environment: template-cascade-ima-jin
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.discover.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - run: mkdir -p cascade-results
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: cascade-*
+          merge-multiple: true
+          path: cascade-results
+      - name: Job summary and idempotent release comment
+        env:
+          GH_TOKEN: ${{ secrets.WARP_FACTORIES_TOKEN }}
+          CASCADE_APPS: ${{ needs.discover.outputs.apps }}
+          TEMPLATE_TAG: ${{ needs.discover.outputs.tag }}
+          RELEASE_ID: ${{ needs.discover.outputs.release_id }}
+        run: node scripts/template-cascade.mjs report

@@ -1,0 +1,12 @@
+{
+  "_deleteWhen": "Delete this fallback when ima-jin/imajin-ai#2905 merges; configure TEMPLATE_REGISTRY_URL instead.",
+  "apps": [
+    { "sourceRepo": "ima-jin/coffee", "templateRef": null, "joined": true },
+    { "sourceRepo": "ima-jin/dykil", "templateRef": null, "joined": true },
+    { "sourceRepo": "ima-jin/events", "templateRef": null, "joined": true },
+    { "sourceRepo": "ima-jin/learn", "templateRef": null, "joined": true },
+    { "sourceRepo": "ima-jin/links", "templateRef": null, "joined": true },
+    { "sourceRepo": "ima-jin/market", "templateRef": null, "joined": true },
+    { "sourceRepo": "gbscontracting/website", "templateRef": null, "joined": true }
+  ]
+}
