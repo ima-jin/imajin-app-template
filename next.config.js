@@ -21,4 +21,19 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+module.exports = async function buildConfig() {
+  const { computeBuildInfo } = await import('./scripts/lib/build-info.mjs');
+  const { readFile } = await import('node:fs/promises');
+  const { version } = JSON.parse(await readFile(`${__dirname}/package.json`, 'utf8'));
+  const build = computeBuildInfo(__dirname, version);
+  return {
+    ...nextConfig,
+    env: {
+      ...nextConfig.env,
+      NEXT_PUBLIC_VERSION: build.version,
+      NEXT_PUBLIC_BUILD_HASH: build.sha,
+      NEXT_PUBLIC_SOURCE_REPO: build.repo,
+      NEXT_PUBLIC_BUILD_TIME: build.builtAt,
+    },
+  };
+};

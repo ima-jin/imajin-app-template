@@ -46,7 +46,9 @@ running process serving the previous build.
    Never `git pull` on the host: it skips every other step here and leaves a stale build serving.
 3. **install** — `pnpm install --frozen-lockfile --ignore-scripts` (the same flags CI uses; nothing in the app needs a
    dependency lifecycle script).
-4. **build** — `node --env-file=.env.local node_modules/next/dist/bin/next build`. The env file is loaded so
+4. **build** — `node --env-file=.env.local node_modules/next/dist/bin/next build`. `next.config.js` ports the kernel's
+   tag selection (`git describe --tags --abbrev=0 --match 'v[0-9]*'`), injects public build metadata, and ignores
+   marker tags. The env file is loaded so
    `NEXT_PUBLIC_*` values are baked into the build; changing one means rebuilding.
 5. **migrate** — `pnpm db:migrate`, **only if the app owns a database**. It applies `migrations/` to this app's own
    schema (`APP_DB_SCHEMA`) and nothing else — see [MIGRATIONS.md](./MIGRATIONS.md). An app that owns no database
@@ -55,6 +57,61 @@ running process serving the previous build.
 7. **health** — poll `/<app>/api/health` for up to ~60 s and require `"status":"ok"`. A healthy but unclaimed app
    (`"claimed":false`) is the expected state on an environment's first deploy: the identity is minted by an operator
    at `<app>/claim`, never by the deploy.
+
+### Record the deployment (required for dev and prod)
+
+After checkout (steps 1–2), run steps 3–7 in your host-owned deploy command **through**
+`scripts/deploy.mjs`, not beside it. The wrapper creates a GitHub Deployment for the
+clean checkout's full SHA, records `in_progress`, runs the command, then polls the
+public `<app URL>/api/build` for the exact SHA and repository before `success`.
+A command failure or stale/unreachable build records `failure` and exits nonzero.
+The app URL is read from trusted host configuration `NEXT_PUBLIC_APP_URL`, including
+any base path, never from a CLI-supplied URL. The GitHub environment is exactly `dev` or `prod`;
+only `prod` is marked production. Existing successful deployments become inactive.
+
+The credential must be a short-lived **GitHub App installation token**, installed on
+this app's repository with **Deployments: write** and **Contents: read**. Obtain it from
+your host's approved credential broker (or the GitHub App token action in a trusted
+deploy workflow). Stream it directly to stdin: never put it in `.env.local`, a file,
+an argument, a PAT, or shell tracing. The wrapper validates installation authentication
+before creating any Deployment and never forwards stdin to the deploy command.
+For a host with `gh` already authenticated as that App installation:
+
+```bash
+# Run after selecting the ref, from the clean target checkout.
+# The host-owned command performs steps 3–7 above, failing on any error.
+# Keep pipefail enabled so credential-provider failures also fail the deploy.
+set -o pipefail
+gh auth token | node --env-file=.env.local scripts/deploy.mjs \
+  --environment dev -- \
+  /absolute/path/to/host-deploy-command
+```
+
+Use the same invocation with `--environment prod` in the prod checkout. No default
+host, SSH credential, private GitHub App key, or deploy workflow is shipped here.
+Mint/refresh the token immediately before deploying (installation tokens expire);
+the credential must remain valid through the final status update.
+
+The wrapper passes the full checkout SHA, source repository, version and build
+timestamp as **non-secret** build environment values to the command. Preserve those
+values across the build (and any SSH hop). `NEXT_PUBLIC_SOURCE_REPO=owner/repo`
+overrides GitHub origin for derived apps. Do not edit the checkout/ref inside the
+command: checkout happens before the wrapper creates its Deployment.
+
+### Public build information
+
+The footer shows `<app> v0.1.0 · build a1b2c3d`; version links to the repository's
+release and the short hash links to its full commit. `GET /api/build` is public,
+including before claiming, and returns `{ version, sha, repo, builtAt }` from the
+same compiled values. `builtAt` is the UTC build time, not request or restart time.
+
+For ordinary builds with no reachable version tags, or tarballs with no git,
+the version falls back to `package.json` and the hash is `local` (not a fake commit
+link). Source repo is inferred only from GitHub origin, or explicitly configured
+with `NEXT_PUBLIC_SOURCE_REPO`. CI-created tarballs may preserve provenance using
+the optional public inputs in `.env.example`; no credentials belong in them.
+Deploys deliberately supply a full SHA even before the first release tag, so
+the live record can be checked against GitHub.
 
 The env file holds non-secret configuration (plus `DATABASE_URL`), never self-secrets.
 The app keystore authenticates vault fetches; credential values live only in memory.

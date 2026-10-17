@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { ImajinAuthStatus } from '@/components/ImajinAuthStatus';
+import { BuildInfo } from '@/components/BuildInfo';
 import { Providers } from './providers';
 import './globals.css';
 
@@ -19,6 +20,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
             <ImajinAuthStatus />
           </header>
           <main>{children}</main>
+          <BuildInfo appName="Imajin App Template" />
         </Providers>
       </body>
     </html>
