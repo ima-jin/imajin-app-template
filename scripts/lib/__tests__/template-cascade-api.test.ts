@@ -96,7 +96,7 @@ describe('per-app orchestration', () => {
     mocks.merge.mockReturnValue({ changed: true, conflicts: ['x'], changelog: '' });
     const api = vi.fn().mockReturnValue(pr);
     syncApp({ ...options, api, list: () => [pr], prepare: () => '/tmp/app' });
-    expect(mocks.exec).toHaveBeenCalledWith('gh',
+    expect(mocks.exec).toHaveBeenCalledWith('/usr/bin/gh',
       ['pr', 'ready', '12', '--undo', '--repo', app.sourceRepo], { stdio: 'pipe' });
   });
   it('skips closed/merged PRs and truly already-synced main', () => {

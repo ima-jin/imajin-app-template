@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { keepAppSection } from './template-cascade.mjs';
 
 export function gitRunner(cwd) {
-  return (...args) => execFileSync('git', args, {
+  return (...args) => execFileSync('/usr/bin/git', args, {
     cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
   }).trimEnd();
 }
@@ -39,7 +39,7 @@ export function mergeTemplate({ cwd, sha, tag, templateRef = null, commit = unde
     const conflicts = record ? JSON.parse(record.slice('Template-Conflicts: '.length)) : [];
     return { conflicts, changelog, changed: false };
   }
-  const show = ref => execFileSync('git', ['show', ref], {
+  const show = ref => execFileSync('/usr/bin/git', ['show', ref], {
     cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
   });
   const appAgents = show('origin/main:AGENTS.md');

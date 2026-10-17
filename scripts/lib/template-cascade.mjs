@@ -66,14 +66,18 @@ export function dryRun(apps, tag) {
 }
 
 export function pullBody({ tag, sha, changelog = '', conflicts }) {
+  const paths = conflicts.map(path => `- \`${path}\``).join('\n');
   const resolution = conflicts.length > 0
-    ? `Draft: resolve these conflict-marker files before making ready:\n${conflicts.map(path => `- \`${path}\``).join('\n')}\n\nOperator hook: \`${conflictLabel}\` — enqueue a Warp run for this PR; preserve app AGENTS.md §8, resolve markers, run app CI + Sonar, then make ready. No public Warp Actions dispatch API is assumed.`
+    ? `Draft: resolve these conflict-marker files before making ready:\n${paths}\n\nOperator hook: \`${conflictLabel}\` — enqueue a Warp run for this PR; preserve app AGENTS.md §8, resolve markers, run app CI + Sonar, then make ready. No public Warp Actions dispatch API is assumed.`
     : 'Clean merge. The app owner reviews and merges after this app’s CI and Sonar pass.';
   return `<!-- template-cascade:${tag} -->\nSync app-shell changes from ${templateRepo} template/main at ${sha} (release ${tag}).\n\nAGENTS.md §8 is kept from this app. Kernel-facing code stays in versioned @ima-jin/* npm packages.\n\n${resolution}\n\n### Template changelog since last synced ref\n${changelog || 'No new template commits.'}\n`;
 }
 
 export function summary(results, tag) {
-  return `## Template cascade ${tag}\n\n${results.map(result =>
-    `- ${result.sourceRepo}: ${result.status}${result.url ? ` — ${result.url}` : ''}${result.detail ? ` — ${result.detail}` : ''}`
-  ).join('\n')}\n`;
+  const lines = results.map(result => {
+    const url = result.url ? ` — ${result.url}` : '';
+    const detail = result.detail ? ` — ${result.detail}` : '';
+    return `- ${result.sourceRepo}: ${result.status}${url}${detail}`;
+  });
+  return `## Template cascade ${tag}\n\n${lines.join('\n')}\n`;
 }

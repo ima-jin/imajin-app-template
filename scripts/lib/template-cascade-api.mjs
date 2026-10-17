@@ -4,10 +4,15 @@ import { tmpdir } from 'node:os';
 import { branchFor, conflictLabel, joinMarker, pullBody, templateRepo } from './template-cascade.mjs';
 import { gitRunner, isAncestor, mergeTemplate } from './template-cascade-git.mjs';
 
-export function githubApi(path, method = 'GET', payload) {
-  const args = ['api', path, '--method', method];
+/**
+ * @param {string} path
+ * @param {string} [method]
+ * @param {object} [payload]
+ */
+export function githubApi(path, method, payload) {
+  const args = ['api', path, '--method', method ?? 'GET'];
   if (payload) args.push('--input', '-');
-  const text = execFileSync('gh', args, {
+  const text = execFileSync('/usr/bin/gh', args, {
     input: payload ? JSON.stringify(payload) : undefined,
     encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -15,7 +20,7 @@ export function githubApi(path, method = 'GET', payload) {
 }
 
 export function githubList(path) {
-  const text = execFileSync('gh', ['api', path, '--paginate', '--slurp'], {
+  const text = execFileSync('/usr/bin/gh', ['api', path, '--paginate', '--slurp'], {
     encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
   });
   return JSON.parse(text).flat();
@@ -65,7 +70,7 @@ export function commitWithApp(repo, branch, api = githubApi) {
       if (!entry) return { path, mode: '100644', type: 'blob', sha: null };
       if (entry.mode === '160000') throw new Error('Submodules require operator review');
       // Read binary-safe blob content without exposing it to a shell.
-      const content = execFileSync('git', ['cat-file', 'blob', entry.object], {
+      const content = execFileSync('/usr/bin/git', ['cat-file', 'blob', entry.object], {
         cwd: git('rev-parse', '--show-toplevel'), stdio: ['pipe', 'pipe', 'pipe'],
       }).toString('base64');
       const blob = api(`repos/${repo}/git/blobs`, 'POST', { content, encoding: 'base64' });
@@ -104,25 +109,27 @@ export function syncApp({ app, tag, sha, templateUrl, api = githubApi, list = gi
   }
   // A retry does not rebuild or force-push an existing resolution branch.
   if (merge.changed) git('push', 'origin', `HEAD:refs/heads/${branch}`);
-  const body = pullBody({ tag, sha, ...merge });
-  let pr;
-  if (existing) {
-    // Preserve an operator's draft/conflict state on no-op retries.
-    pr = api(`repos/${repo}/pulls/${existing.number}`, 'PATCH',
-      merge.changed ? { body } : { title: existing.title });
-  } else {
-    pr = api(`repos/${repo}/pulls`, 'POST', {
-      title: `chore: sync template ${tag}`, head: branch, base: 'main', body, draft: merge.conflicts.length > 0,
-    });
-  }
+  const pr = upsertPull({ repo, tag, sha, branch, merge, existing, api });
   if (merge.conflicts.length > 0) {
     if (!pr.draft) {
-      execFileSync('gh', ['pr', 'ready', String(pr.number), '--undo', '--repo', repo], { stdio: 'pipe' });
+      execFileSync('/usr/bin/gh', ['pr', 'ready', String(pr.number), '--undo', '--repo', repo], { stdio: 'pipe' });
     }
     labelConflict(repo, pr.number, api);
   }
   const conflict = merge.conflicts.length > 0 || pr.draft;
   return { sourceRepo: repo, status: conflict ? 'conflict (draft; operator hook)' : 'PR', url: pr.html_url };
+}
+
+function upsertPull({ repo, tag, sha, branch, merge, existing, api }) {
+  const body = pullBody({ tag, sha, ...merge });
+  if (existing) {
+    // Preserve an operator's draft/conflict state on no-op retries.
+    return api(`repos/${repo}/pulls/${existing.number}`, 'PATCH',
+      merge.changed ? { body } : { title: existing.title });
+  }
+  return api(`repos/${repo}/pulls`, 'POST', {
+    title: `chore: sync template ${tag}`, head: branch, base: 'main', body, draft: merge.conflicts.length > 0,
+  });
 }
 
 /** @param {{repo: string, branch: string, existing?: object, templateUrl: string, sha: string}} options */
@@ -133,7 +140,7 @@ export function prepareRepo({ repo, branch, existing = undefined, templateUrl, s
   // Credential is supplied only through the environment, never a URL, argument,
   // persisted git config or log. The runner never executes app-authored code.
   git('config', 'credential.helper',
-    '!f() { printf "username=x-access-token\\npassword=%s\\n" "$GH_TOKEN"; }; f');
+    String.raw`!f() { printf "username=x-access-token\npassword=%s\n" "$GH_TOKEN"; }; f`);
   git('remote', 'add', 'origin', `https://github.com/${repo}.git`);
   git('fetch', '--quiet', 'origin', 'main');
   git('update-ref', 'refs/remotes/origin/main', 'FETCH_HEAD');
