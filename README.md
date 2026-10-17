@@ -112,6 +112,70 @@ The script adds the `template` remote if missing, fetches `template/main`, and c
 
 On a conflict (almost always AGENTS.md §8, or the renamed identity files from step 3), keep your version of
 what is yours and take the template's side of the shared contract.
+### Automatic release cascade (template maintainers)
+
+Publishing a `v*` release targeting `main` runs `Template release cascade`. It verifies
+the tag is on `template/main` and merges that released main-history SHA into
+`chore/sync-from-template-<tag>` in each joined app. **It never pushes app `main`,
+force-pushes, or auto-merges.** App owners merge after their own CI and Sonar pass.
+Kernel-facing code ships as versioned `@ima-jin/*` npm packages; this cascade carries
+the app shell (workflows, checks, config, shared UI and contract docs), not kernel code.
+App `AGENTS.md` §8 is always retained, even on otherwise clean merges.
+
+**Registry:** set repository variable `TEMPLATE_REGISTRY_URL` to the HTTPS list-by-template
+endpoint from [imajin-ai#2905](https://github.com/ima-jin/imajin-ai/issues/2905).
+It accepts `[{ sourceRepo, templateRef, joined }]` or `{ apps: [...] }`.
+Until that endpoint lands, `derived-apps.json` lists coffee, dykil, events, learn,
+links, market and gbscontracting/website. **Delete that fallback when #2905 merges.**
+`templateRef: null` uses the actual merge-base for the changelog; the live registry
+should supply the last merged template tag/SHA. An unavailable or invalid configured
+endpoint fails closed; it never silently falls back to stale app registration data.
+The workflow sends no GitHub credential to the registry. If #2905 requires a separate
+app-service credential, an administrator must provide a non-secret read projection
+or an approved token exchange first; do not add a personal/service-token secret here.
+
+**Cross-org installation tokens:** create GitHub environments
+`template-cascade-ima-jin` and `template-cascade-gbscontracting` (and one for any later
+owner). Each has exactly one secret, `WARP_FACTORIES_TOKEN`, holding a fresh
+**warp-factories App installation token for that owner**, repository-scoped to the
+registered targets (plus this template for ima-jin reporting). An installation token
+cannot span org installations. The existing App operator must refresh these
+short-lived tokens before release/retry; Actions does not store an App private key,
+PAT or second credential. Restrict environment deployments to `main` and protected
+`v*` tags. The App installation needs Contents, Pull requests and Issues write,
+Metadata read, plus Workflows write because the shell includes `.github/workflows`.
+The workflow's own `GITHUB_TOKEN` is read-only (reporting also reads artifacts).
+Merge commits use the GitHub Git-data API's default App attribution, without
+overriding Git identity. The cascade never executes app code, installers or git hooks.
+Before the API merge commit, a new sync branch is seeded with the template SHA
+to upload its parent objects; the merge then fast-forwards that same branch.
+Retries recover this seed without resetting an existing resolution branch.
+Missing/expired/wrong-org tokens fail that app and are reported, never bypassed.
+
+**Conflict-resolution hook:** a real merge commit with unresolved files is pushed to
+the sync branch and a **draft** PR lists the paths. The `template-sync-conflict`
+label is the durable operator-loop signal. Configure the operator to poll open PRs
+with that label across the registered repos, enqueue one Warp resolution run per
+PR head SHA, resolve all listed files (including binary/deletion conflicts), retain
+the app's §8, run app CI + Sonar and remove the label/make ready only once clean.
+This is a documented handoff, **not a claim that an Actions-to-Warp dispatch API exists**.
+Until the operator connects this hook, labelled drafts wait for operator pickup.
+No marker-bearing draft should be merged. No-op retries preserve operator edits
+and draft state; closed/merged PRs for the tag are not reopened.
+
+Unjoined registry entries (or repos whose actual history is unrelated) receive one
+marker-keyed join issue across all releases, even if the original issue was closed.
+Releases are serialized to avoid duplicate issues. Every app gets a job-summary
+line. GitHub releases have no REST comments API: the workflow creates/updates one
+comment on the release tag's commit and links it, with the results, in a marked
+release-notes block, preserving the original notes.
+
+Retry with `workflow_dispatch`, input `tag` = the same published tag. To preview
+without tokens, git changes, PRs or issues:
+
+```bash
+node scripts/template-cascade.mjs dry-run v0.1.0
+```
 
 ## Consuming `@ima-jin/*`
 
