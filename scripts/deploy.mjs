@@ -11,7 +11,7 @@ try {
   const options = deploymentArgs(process.argv.slice(2));
   const root = process.cwd();
   const git = resolveGitBinary();
-  if (gitOutput(git, root, ['status', '--porcelain']) !== '') {
+  if (gitOutput(git, root, ['status', '--porcelain', '--untracked-files=no']) !== '') {
     throw new Error('Deploy from a clean checkout of the target ref.');
   }
   const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
