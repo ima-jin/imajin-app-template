@@ -24,6 +24,10 @@ describe('middleware', () => {
     resolveKeystorePathMock.mockClear();
   });
 
+  it('makes build provenance public before claiming', async () => {
+    expect((await middlewareFor('/api/build', { claimed: false })).headers.get('x-middleware-next')).toBe('1');
+  });
+
   it('serves the "not claimed yet" page for an ordinary route when unclaimed', async () => {
     const response = await middlewareFor('/', { claimed: false });
 

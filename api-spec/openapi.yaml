@@ -33,6 +33,35 @@ components:
         error: { type: string }
 
 paths:
+  /api/build:
+    get:
+      operationId: getBuild
+      summary: Immutable public build provenance (also available before claiming)
+      tags: [app-template]
+      security: []
+      responses:
+        "200":
+          description: The same build metadata displayed in the footer
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, sha, repo, builtAt]
+                additionalProperties: false
+                properties:
+                  version:
+                    type: string
+                    description: Nearest reachable v-prefixed release tag without v, or package.json version
+                  sha:
+                    type: string
+                    description: Commit SHA (full when derived from git), or local for an untagged/tarball build
+                  repo:
+                    type: string
+                    description: GitHub owner/name from NEXT_PUBLIC_SOURCE_REPO or origin; empty if unavailable
+                  builtAt:
+                    type: string
+                    format: date-time
+                    description: Build timestamp, not request time
   /api/webhooks/kernel:
     post:
       operationId: postKernelWebhook
