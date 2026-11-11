@@ -1,9 +1,14 @@
 # &lt;App Name&gt; — a third-party app on Imajin
 
+**identity and authority for AI agents.**
+
+App template for [Imajin](https://imajin.ai), the trust layer for AI agents.
+Imajin is in alpha.
+
 > Forked from [`ima-jin/imajin-app-template`](https://github.com/ima-jin/imajin-app-template). **Read
 > [`AGENTS.md`](./AGENTS.md) first** — it defines the boundary this app must not cross.
 
-**Platform:** [Imajin](https://imajin.ai) (sovereign-tech kernel) · **Reference app:** `ima-jin/imajin-scorecard`
+**Platform:** [Imajin](https://imajin.ai) (the trust layer for AI agents) · **Reference app:** `ima-jin/imajin-scorecard`
 
 This repository **is the app** — a real, arms-length third-party application that composes the Imajin platform
 **only through its public app surface** (`requireAppAuth` + the documented kernel API). It holds **no `workspace:*`
